@@ -138,10 +138,15 @@ func New(state *config.State) Model {
 	targetList.SetShowStatusBar(true)
 	targetList.SetFilteringEnabled(true)
 
+	modelList := list.New([]list.Item{}, delegate, 0, 0)
+	modelList.SetShowStatusBar(true)
+	modelList.SetFilteringEnabled(true)
+
 	return Model{
 		state:      state,
 		view:       viewTargets,
 		targetList: targetList,
+		modelList:  modelList,
 	}
 }
 
