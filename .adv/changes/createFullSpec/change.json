@@ -1,0 +1,469 @@
+{
+  "$schema": "https://raw.githubusercontent.com/anomalyco/oc-plugins/main/advance/plugin/schemas/change.schema.json",
+  "id": "createFullSpec",
+  "title": "create full spec",
+  "status": "draft",
+  "created_at": "2026-02-07T21:44:43.993Z",
+  "tasks": [
+    {
+      "id": "tk-le5EaSEl",
+      "title": "Define spec requirements for the model-preferences plugin and command behavior",
+      "status": "done",
+      "priority": 0,
+      "created_at": "2026-02-07T21:45:35.210Z",
+      "started_at": "2026-02-07T21:56:14.090Z",
+      "completed_at": "2026-02-07T22:00:15.251Z",
+      "completed_by": "Defined 7 requirements with 16 scenarios for model-preferences-routing capability: plugin registration, list tool, set tool, global config persistence, slash command dialog, no-fallback validation, agent filtering",
+      "tdd_phase": "none",
+      "tdd_evidence": {
+        "skipped": true,
+        "skip_reason": "trivial: spec definition is documentation, not testable code"
+      }
+    },
+    {
+      "id": "tk-MBVBL4Kf",
+      "title": "Write acceptance tests for dialog UX, immediate persistence, and model routing",
+      "status": "done",
+      "priority": 1,
+      "created_at": "2026-02-07T21:45:35.251Z",
+      "started_at": "2026-02-07T22:01:21.654Z",
+      "completed_at": "2026-02-07T22:06:11.435Z",
+      "completed_by": "15 acceptance tests written covering all 7 requirements: plugin registration (2), list tool (5), set tool (4), global config persistence (2), agent filtering (1), slash command (covered by list/set). All fail against stubs — red phase confirmed.",
+      "tdd_phase": "red",
+      "tdd_evidence": {
+        "red": {
+          "test_file": "src/index.test.ts",
+          "command": "pnpm test",
+          "output_snippet": "15 tests fail - TypeError: Cannot read properties of undefined (reading 'execute') - stubs return empty tool record",
+          "exit_code": 1,
+          "recorded_at": "2026-02-07T22:06:08.950Z"
+        }
+      }
+    },
+    {
+      "id": "tk-MkkR8OXL",
+      "title": "Add documentation for installation, command usage, and invalid-model remediation",
+      "status": "done",
+      "priority": 2,
+      "created_at": "2026-02-07T21:45:35.353Z",
+      "started_at": "2026-02-07T22:10:13.552Z",
+      "completed_at": "2026-02-07T22:10:41.737Z",
+      "completed_by": "README.md written with installation, usage (/model-preferences command + direct tool usage), how it works, what gets listed, invalid model remediation, and development instructions.",
+      "tdd_phase": "none",
+      "tdd_evidence": {
+        "skipped": true,
+        "skip_reason": "trivial: documentation-only task, no testable code"
+      }
+    },
+    {
+      "id": "tk-qasUuhLN",
+      "title": "Implement plugin: src/index.ts (plugin entry + 2 tools), src/config.ts (global config read/write via jsonc-parser), commands/model-preferences.md (slash command), package.json with deps",
+      "status": "done",
+      "priority": 3,
+      "deps": [
+        {
+          "type": "blocked_by",
+          "target": "tk-le5EaSEl"
+        },
+        {
+          "type": "blocked_by",
+          "target": "tk-MBVBL4Kf"
+        }
+      ],
+      "created_at": "2026-02-07T21:55:05.136Z",
+      "started_at": "2026-02-07T22:08:49.231Z",
+      "completed_at": "2026-02-07T22:10:06.187Z",
+      "completed_by": "Implemented src/config.ts (jsonc-parser read/write), src/index.ts (2 tools: model_prefs_list, model_prefs_set), commands/model-preferences.md (slash command). All 15 acceptance tests pass.",
+      "tdd_phase": "green",
+      "tdd_evidence": {
+        "green": {
+          "test_file": "src/index.test.ts",
+          "command": "pnpm test",
+          "output_snippet": "15 passed (15) — Duration 246ms",
+          "exit_code": 0,
+          "recorded_at": "2026-02-07T22:09:39.760Z"
+        }
+      }
+    }
+  ],
+  "deltas": {
+    "model-preferences-routing": [
+      {
+        "id": "dl-2W7HYyLp",
+        "operation": "add",
+        "requirement": {
+          "id": "rq-kzNmbHfj",
+          "title": "Plugin Registration",
+          "body": "The plugin must export a valid OpenCode plugin via @opencode-ai/plugin that registers exactly 2 tools: model_prefs_list and model_prefs_set.",
+          "priority": "must",
+          "tags": [
+            "plugin",
+            "registration"
+          ],
+          "scenarios": [
+            {
+              "id": "rq-kzNmbHfj.1",
+              "title": "Plugin loads and registers tools",
+              "given": [
+                "the plugin is installed in opencode.json"
+              ],
+              "when": "OpenCode starts a session",
+              "then": [
+                "the plugin registers without errors",
+                "tools model_prefs_list and model_prefs_set are available"
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "id": "dl-GQRx3ogJ",
+        "operation": "add",
+        "requirement": {
+          "id": "rq-HERsbxz6",
+          "title": "model_prefs_list Tool",
+          "body": "The model_prefs_list tool must return a segmented table listing all user-facing Agents, Sub-Agents, and loaded custom Slash-Commands, each with their current model mapping. Mappings show 'none' if not explicitly set. Hidden/system agents (compaction, title, summary) must be excluded.",
+          "priority": "must",
+          "tags": [
+            "tool",
+            "listing",
+            "agents"
+          ],
+          "scenarios": [
+            {
+              "id": "rq-HERsbxz6.1",
+              "title": "Lists agents with no mappings set",
+              "given": [
+                "no model preferences are configured in global config",
+                "the session has agents: coder, plan, ask"
+              ],
+              "when": "model_prefs_list is called",
+              "then": [
+                "output contains Agents section with coder, plan, ask",
+                "each shows model as 'none'",
+                "system agents compaction, title, summary are not listed"
+              ]
+            },
+            {
+              "id": "rq-HERsbxz6.2",
+              "title": "Lists agents with existing mappings",
+              "given": [
+                "global config has agent.coder.model set to 'anthropic/claude-sonnet-4-20250514'"
+              ],
+              "when": "model_prefs_list is called",
+              "then": [
+                "coder shows model as 'anthropic/claude-sonnet-4-20250514'",
+                "other agents show 'none'"
+              ]
+            },
+            {
+              "id": "rq-HERsbxz6.3",
+              "title": "Lists custom slash commands",
+              "given": [
+                "custom commands 'deploy' and 'review' are loaded"
+              ],
+              "when": "model_prefs_list is called",
+              "then": [
+                "output contains Slash-Commands section with deploy and review",
+                "built-in commands like help are not listed"
+              ]
+            },
+            {
+              "id": "rq-HERsbxz6.4",
+              "title": "Segments output by type",
+              "given": [
+                "agents, sub-agents, and commands all exist"
+              ],
+              "when": "model_prefs_list is called",
+              "then": [
+                "output is segmented into Agents, Sub-Agents, and Slash-Commands sections"
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "id": "dl-3poF78mV",
+        "operation": "add",
+        "requirement": {
+          "id": "rq-2AFh7KSa",
+          "title": "model_prefs_set Tool",
+          "body": "The model_prefs_set tool must accept a target type (agent or command), target name, and model ID in provider/model format. It must write the mapping to global config (~/.config/opencode/opencode.json) immediately. It must validate that the model exists in the provider registry before writing.",
+          "priority": "must",
+          "tags": [
+            "tool",
+            "persistence",
+            "config"
+          ],
+          "scenarios": [
+            {
+              "id": "rq-2AFh7KSa.1",
+              "title": "Sets agent model preference",
+              "given": [
+                "agent 'coder' exists",
+                "model 'anthropic/claude-sonnet-4-20250514' is available"
+              ],
+              "when": "model_prefs_set is called with type='agent', name='coder', model='anthropic/claude-sonnet-4-20250514'",
+              "then": [
+                "global config is updated with agent.coder.model = 'anthropic/claude-sonnet-4-20250514'",
+                "tool returns success confirmation"
+              ]
+            },
+            {
+              "id": "rq-2AFh7KSa.2",
+              "title": "Sets command model preference",
+              "given": [
+                "command 'deploy' exists",
+                "model 'openai/gpt-4o' is available"
+              ],
+              "when": "model_prefs_set is called with type='command', name='deploy', model='openai/gpt-4o'",
+              "then": [
+                "global config is updated with command.deploy.model = 'openai/gpt-4o'",
+                "tool returns success confirmation"
+              ]
+            },
+            {
+              "id": "rq-2AFh7KSa.3",
+              "title": "Clears a model preference",
+              "given": [
+                "agent 'coder' has a model mapping set"
+              ],
+              "when": "model_prefs_set is called with type='agent', name='coder', model='none'",
+              "then": [
+                "the agent.coder.model field is removed from global config",
+                "tool returns confirmation that preference was cleared"
+              ]
+            },
+            {
+              "id": "rq-2AFh7KSa.4",
+              "title": "Rejects invalid model",
+              "given": [
+                "model 'fake/nonexistent-model' does not exist in any provider"
+              ],
+              "when": "model_prefs_set is called with model='fake/nonexistent-model'",
+              "then": [
+                "tool returns an error message",
+                "global config is not modified",
+                "error includes the invalid model name"
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "id": "dl-BUh55K3e",
+        "operation": "add",
+        "requirement": {
+          "id": "rq-Qvl5PkuG",
+          "title": "Global Config Persistence",
+          "body": "All model preference mappings must be stored in and read from the global OpenCode config file (~/.config/opencode/opencode.json). Writes must use jsonc-parser to preserve JSONC formatting (comments, trailing commas). The plugin must never use client.config.update() which targets project config.",
+          "priority": "must",
+          "tags": [
+            "persistence",
+            "config",
+            "global"
+          ],
+          "scenarios": [
+            {
+              "id": "rq-Qvl5PkuG.1",
+              "title": "Writes preserve JSONC formatting",
+              "given": [
+                "global config contains comments and trailing commas"
+              ],
+              "when": "a model preference is set",
+              "then": [
+                "existing comments are preserved",
+                "existing formatting is maintained",
+                "the new field is added with consistent indentation"
+              ]
+            },
+            {
+              "id": "rq-Qvl5PkuG.2",
+              "title": "Config file is created if missing",
+              "given": [
+                "no global config file exists at ~/.config/opencode/opencode.json"
+              ],
+              "when": "a model preference is set",
+              "then": [
+                "the config file is created with proper JSON structure",
+                "the mapping is written correctly"
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "id": "dl-3w6jiAp0",
+        "operation": "add",
+        "requirement": {
+          "id": "rq-aMS7spq6",
+          "title": "Slash Command Dialog",
+          "body": "The /model-preferences slash command must instruct the AI to orchestrate an interactive dialog using model_prefs_list for display, the question tool for selections, and model_prefs_set for persistence. The flow is: list all targets, let user select a row, show available models, let user pick, persist, and loop until user exits.",
+          "priority": "must",
+          "tags": [
+            "command",
+            "ux",
+            "dialog"
+          ],
+          "scenarios": [
+            {
+              "id": "rq-aMS7spq6.1",
+              "title": "Command triggers model listing",
+              "given": [
+                "the plugin is installed"
+              ],
+              "when": "user runs /model-preferences",
+              "then": [
+                "AI calls model_prefs_list",
+                "AI presents the segmented list to the user"
+              ]
+            },
+            {
+              "id": "rq-aMS7spq6.2",
+              "title": "User can select and set a model",
+              "given": [
+                "the model preferences list is displayed"
+              ],
+              "when": "user selects an agent row and picks a model",
+              "then": [
+                "AI calls model_prefs_set with the selection",
+                "AI confirms the mapping was saved",
+                "AI offers to continue or exit"
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "id": "dl-f4TWdESh",
+        "operation": "add",
+        "requirement": {
+          "id": "rq-ldXrVKth",
+          "title": "No Silent Fallback on Invalid Model",
+          "body": "When a mapped model is invalid or unavailable at runtime, OpenCode's native ModelNotFoundError must block execution. The plugin must not implement custom validation that silently falls back to a default model. The native error includes fuzzy suggestions for correction.",
+          "priority": "must",
+          "tags": [
+            "validation",
+            "error-handling"
+          ],
+          "scenarios": [
+            {
+              "id": "rq-ldXrVKth.1",
+              "title": "Invalid model blocks agent execution",
+              "given": [
+                "agent 'coder' is mapped to 'anthropic/deleted-model' which no longer exists"
+              ],
+              "when": "user invokes the coder agent",
+              "then": [
+                "execution is blocked",
+                "error message includes the invalid model name",
+                "error message includes fuzzy suggestions"
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "id": "dl-jdjSYdvc",
+        "operation": "add",
+        "requirement": {
+          "id": "rq-gXZ8NWRB",
+          "title": "Agent Filtering",
+          "body": "The model_prefs_list tool must exclude hidden/system agents from the listing. Specifically, agents named compaction, title, and summary must be filtered out. All other agents (built-in user-facing and user-defined) must be included and correctly categorized as Agent or Sub-Agent based on their mode field.",
+          "priority": "must",
+          "tags": [
+            "filtering",
+            "agents"
+          ],
+          "scenarios": [
+            {
+              "id": "rq-gXZ8NWRB.1",
+              "title": "System agents excluded",
+              "given": [
+                "session has agents: coder, plan, compaction, title, summary"
+              ],
+              "when": "model_prefs_list is called",
+              "then": [
+                "coder and plan are listed",
+                "compaction, title, and summary are not listed"
+              ]
+            },
+            {
+              "id": "rq-gXZ8NWRB.2",
+              "title": "Agents categorized by mode",
+              "given": [
+                "agent 'coder' has mode 'primary'",
+                "agent 'explore' has mode 'subagent'"
+              ],
+              "when": "model_prefs_list is called",
+              "then": [
+                "coder appears in Agents section",
+                "explore appears in Sub-Agents section"
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "wisdom": [
+    {
+      "id": "ws-ys4727",
+      "type": "gotcha",
+      "content": "Bare `catch {}` blocks in config.ts swallowed ALL errors (permissions, disk I/O, encoding) not just ENOENT. Fixed to check `(error as NodeJS.ErrnoException).code === 'ENOENT'` and re-throw others. Always discriminate error types in catch blocks for file operations.",
+      "recorded_at": "2026-02-07T22:16:36.489Z"
+    },
+    {
+      "id": "ws-bqrBLQ",
+      "type": "convention",
+      "content": "The 8 `any` usages in src/index.ts are a known trade-off: @opencode-ai/plugin SDK's PluginInput.client type doesn't expose typed accessors for app.agents(), command.list(), or provider.list(). When SDK types improve, replace with proper interfaces. Tracked as deliberate-prudent debt.",
+      "recorded_at": "2026-02-07T22:16:39.387Z"
+    },
+    {
+      "id": "ws-KSylbW",
+      "type": "gotcha",
+      "content": "Bare `catch {}` blocks in config.ts swallowed ALL errors (permissions, disk I/O, encoding) not just ENOENT. Fixed to check `(error as NodeJS.ErrnoException).code === 'ENOENT'` and re-throw others. Always discriminate error types in catch blocks for file operations.",
+      "source_task": "tk-qasUuhLN",
+      "recorded_at": "2026-02-07T22:17:22.597Z"
+    },
+    {
+      "id": "ws-phcm-9",
+      "type": "convention",
+      "content": "The 8 `any` usages in src/index.ts are a known trade-off: @opencode-ai/plugin SDK's PluginInput.client type doesn't expose typed accessors for app.agents(), command.list(), or provider.list(). When SDK types improve, replace with proper interfaces. Tracked as deliberate-prudent debt.",
+      "source_task": "tk-qasUuhLN",
+      "recorded_at": "2026-02-07T22:17:26.317Z"
+    }
+  ],
+  "gates": {
+    "research": {
+      "status": "done",
+      "completed_at": "2026-02-07T21:55:02.797Z",
+      "completed_by": "agent"
+    },
+    "prep": {
+      "status": "done",
+      "completed_at": "2026-02-07T22:01:09.235Z",
+      "completed_by": "agent"
+    },
+    "implementation": {
+      "status": "done",
+      "completed_at": "2026-02-07T22:10:45.844Z",
+      "completed_by": "agent"
+    },
+    "review": {
+      "status": "done",
+      "completed_at": "2026-02-07T22:13:40.349Z",
+      "completed_by": "agent"
+    },
+    "harden": {
+      "status": "done",
+      "completed_at": "2026-02-07T22:17:26.973Z",
+      "completed_by": "agent"
+    },
+    "signoff": {
+      "status": "done",
+      "completed_at": "2026-02-08T06:04:43.595Z",
+      "completed_by": "user"
+    }
+  }
+}
