@@ -27,9 +27,21 @@ var (
 	statusStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#A6E3A1")).
 			Italic(true)
+
+	sectionStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#7D56F4")).
+			Bold(true).
+			PaddingTop(1)
 )
 
 // -- List items --------------------------------------------------------------
+
+// sectionItem is a non-selectable section header in the target list.
+type sectionItem struct{ label string }
+
+func (s sectionItem) Title() string       { return sectionStyle.Render(s.label) }
+func (s sectionItem) Description() string { return "" }
+func (s sectionItem) FilterValue() string { return "" }
 
 // targetItem wraps a config.Target for the list.
 type targetItem struct {
@@ -83,6 +95,43 @@ func (m modelItem) FilterValue() string {
 	return m.model.ID + " " + m.model.Name
 }
 
+// buildTargetItems constructs the ordered, section-headed list items:
+// Agents → Sub-Agents → Other (commands).
+func buildTargetItems(targets []config.Target) []list.Item {
+	var primary, subagent, commands []config.Target
+	for _, t := range targets {
+		switch {
+		case t.Kind == config.KindAgent && (t.Mode == "primary" || t.Mode == "all"):
+			primary = append(primary, t)
+		case t.Kind == config.KindAgent && t.Mode == "subagent":
+			subagent = append(subagent, t)
+		default:
+			commands = append(commands, t)
+		}
+	}
+
+	var items []list.Item
+	if len(primary) > 0 {
+		items = append(items, sectionItem{"Agents"})
+		for _, t := range primary {
+			items = append(items, targetItem{target: t})
+		}
+	}
+	if len(subagent) > 0 {
+		items = append(items, sectionItem{"Sub-Agents"})
+		for _, t := range subagent {
+			items = append(items, targetItem{target: t})
+		}
+	}
+	if len(commands) > 0 {
+		items = append(items, sectionItem{"Other"})
+		for _, t := range commands {
+			items = append(items, targetItem{target: t})
+		}
+	}
+	return items
+}
+
 // -- View state --------------------------------------------------------------
 
 type viewState int
@@ -107,29 +156,7 @@ type Model struct {
 
 // New creates the initial TUI model.
 func New(state *config.State) Model {
-	// Build target list items grouped by section
-	var items []list.Item
-
-	// Primary agents
-	for _, t := range state.Targets {
-		if t.Kind == config.KindAgent && (t.Mode == "primary" || t.Mode == "all") {
-			items = append(items, targetItem{target: t})
-		}
-	}
-
-	// Subagents
-	for _, t := range state.Targets {
-		if t.Kind == config.KindAgent && t.Mode == "subagent" {
-			items = append(items, targetItem{target: t})
-		}
-	}
-
-	// Commands
-	for _, t := range state.Targets {
-		if t.Kind == config.KindCommand {
-			items = append(items, targetItem{target: t})
-		}
-	}
+	items := buildTargetItems(state.Targets)
 
 	delegate := list.NewDefaultDelegate()
 	targetList := list.New(items, delegate, 0, 0)
@@ -236,6 +263,7 @@ func (m Model) handleSelect() (tea.Model, tea.Cmd) {
 	if m.view == viewTargets {
 		item, ok := m.targetList.SelectedItem().(targetItem)
 		if !ok {
+			// sectionItem or nothing selected — do nothing
 			return m, nil
 		}
 		t := item.target
@@ -297,24 +325,7 @@ func (m Model) buildModelList(t config.Target) list.Model {
 }
 
 func (m Model) rebuildTargetList() Model {
-	var items []list.Item
-
-	for _, t := range m.state.Targets {
-		if t.Kind == config.KindAgent && (t.Mode == "primary" || t.Mode == "all") {
-			items = append(items, targetItem{target: t})
-		}
-	}
-	for _, t := range m.state.Targets {
-		if t.Kind == config.KindAgent && t.Mode == "subagent" {
-			items = append(items, targetItem{target: t})
-		}
-	}
-	for _, t := range m.state.Targets {
-		if t.Kind == config.KindCommand {
-			items = append(items, targetItem{target: t})
-		}
-	}
-
+	items := buildTargetItems(m.state.Targets)
 	m.targetList.SetItems(items)
 	return m
 }
