@@ -71,11 +71,13 @@ Built-in primary agents (`build` and `plan`) are shown as `[locked]` — their c
 ### Discovery
 
 - **Built-in agents**: `build`, `plan` (primary, locked); `general`, `explore` (subagent)
-- **JSON agents**: From `agent.*` keys in `opencode.json` (excludes system agents: `compaction`, `title`, `summary`)
-- **Markdown agents**: `~/.config/opencode/agents/*.md` and `.opencode/agents/*.md`
+- **Markdown agents**: `~/.config/opencode/agents/*.md` and `.opencode/agents/*.md` — discovered first; `mode` from frontmatter takes precedence
+- **JSON agents**: From `agent.*` keys in `opencode.json` (excludes system agents: `compaction`, `title`, `summary`); only adds agents not already defined by a markdown file. JSON `model` overrides are always applied regardless of which source defined the agent.
 - **JSON commands**: From `command.*` keys in `opencode.json`
 - **Markdown commands**: `~/.config/opencode/commands/*.md` and `.opencode/commands/*.md`
 - **Models**: All entries under `provider.*.models` in `opencode.json`
+
+> **Precedence note**: if an agent is defined in both a markdown file and `opencode.json`, the markdown `mode` wins. This means an agent with `mode: subagent` in its `.md` file correctly appears under Sub-Agents even if the JSON entry has no `mode` field.
 
 ### Config writes
 
