@@ -32,6 +32,7 @@ type Target struct {
 	Mode    string // "primary", "subagent", "system" (agents only)
 	Model   string // current model preference, empty = none
 	BuiltIn bool
+	Locked  bool // true for built-in primary agents whose cycle order is fixed by OpenCode
 }
 
 // Model represents an available model from a provider.
@@ -49,8 +50,8 @@ type State struct {
 
 // Built-in agents from OpenCode core.
 var builtinAgents = []Target{
-	{Name: "build", Kind: KindAgent, Mode: "primary", BuiltIn: true},
-	{Name: "plan", Kind: KindAgent, Mode: "primary", BuiltIn: true},
+	{Name: "build", Kind: KindAgent, Mode: "primary", BuiltIn: true, Locked: true},
+	{Name: "plan", Kind: KindAgent, Mode: "primary", BuiltIn: true, Locked: true},
 	{Name: "general", Kind: KindAgent, Mode: "subagent", BuiltIn: true},
 	{Name: "explore", Kind: KindAgent, Mode: "subagent", BuiltIn: true},
 }
@@ -330,6 +331,77 @@ func SetModel(kind TargetKind, name, model string) error {
 	}
 
 	// Verify it's still valid JSON
+	if !json.Valid(updated) {
+		return fmt.Errorf("resulting config is invalid JSON")
+	}
+
+	return os.WriteFile(configPath, updated, 0644)
+}
+
+// SetAgentOrder rewrites the agent section of opencode.json so that keys appear
+// in the given order. This controls the Tab-cycle order for custom primary agents
+// in OpenCode, since it uses JS object insertion order.
+//
+// Built-in agents (build, plan) are always first in OpenCode's cycle regardless
+// of JSON order, so only custom/non-locked agents benefit from reordering.
+//
+// names must contain all agent names currently in the config agent section.
+// Any names not present in the current config are ignored.
+func SetAgentOrder(names []string) error {
+	configPath := ConfigPath()
+
+	raw, err := os.ReadFile(configPath)
+	if err != nil {
+		return fmt.Errorf("reading config: %w", err)
+	}
+
+	// Collect existing agent entries in a map: name -> raw JSON value
+	agentEntries := make(map[string]string)
+	gjson.GetBytes(raw, "agent").ForEach(func(key, val gjson.Result) bool {
+		agentEntries[key.String()] = val.Raw
+		return true
+	})
+
+	if len(agentEntries) == 0 {
+		// Nothing to reorder
+		return nil
+	}
+
+	// Delete the entire agent section, then rebuild in order
+	updated, err := sjson.DeleteBytes(raw, "agent")
+	if err != nil {
+		return fmt.Errorf("deleting agent section: %w", err)
+	}
+
+	// Re-insert entries in the requested order (skip any names not in config)
+	for _, name := range names {
+		raw, ok := agentEntries[name]
+		if !ok {
+			continue
+		}
+		var val interface{}
+		if err := json.Unmarshal([]byte(raw), &val); err != nil {
+			return fmt.Errorf("parsing agent %q: %w", name, err)
+		}
+		updated, err = sjson.SetBytes(updated, "agent."+name, val)
+		if err != nil {
+			return fmt.Errorf("writing agent %q: %w", name, err)
+		}
+		delete(agentEntries, name)
+	}
+
+	// Append any remaining agents not in the names list (preserve them at end)
+	for name, raw := range agentEntries {
+		var val interface{}
+		if err := json.Unmarshal([]byte(raw), &val); err != nil {
+			return fmt.Errorf("parsing agent %q: %w", name, err)
+		}
+		updated, err = sjson.SetBytes(updated, "agent."+name, val)
+		if err != nil {
+			return fmt.Errorf("writing remaining agent %q: %w", name, err)
+		}
+	}
+
 	if !json.Valid(updated) {
 		return fmt.Errorf("resulting config is invalid JSON")
 	}

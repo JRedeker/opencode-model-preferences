@@ -55,6 +55,9 @@ func (t targetItem) Description() string {
 	var parts []string
 	if t.target.Kind == config.KindAgent {
 		parts = append(parts, t.target.Mode)
+		if t.target.Locked {
+			parts = append(parts, "[locked]")
+		}
 	} else {
 		parts = append(parts, "command")
 	}
@@ -218,6 +221,10 @@ type writeResultMsg struct {
 	model  string
 }
 
+type reorderResultMsg struct {
+	err error
+}
+
 // -- Update ------------------------------------------------------------------
 
 func (m Model) Init() tea.Cmd {
@@ -251,6 +258,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.view = viewTargets
 		return m, nil
 
+	case reorderResultMsg:
+		if msg.err != nil {
+			m.status = fmt.Sprintf("Error reordering: %v", msg.err)
+		} else {
+			m.status = "Agent order saved"
+		}
+		newState, err := config.Load()
+		if err == nil {
+			m.state = newState
+			m = m.rebuildTargetList()
+		}
+		return m, nil
+
 	case tea.KeyMsg:
 		// Don't handle keys when filtering
 		if m.view == viewTargets && m.targetList.FilterState() == list.Filtering {
@@ -279,6 +299,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case key.Matches(msg, key.NewBinding(key.WithKeys("enter"))):
 			return m.handleSelect()
+
+		case key.Matches(msg, key.NewBinding(key.WithKeys("ctrl+up"))):
+			if m.view == viewTargets {
+				return m.handleReorder(-1)
+			}
+
+		case key.Matches(msg, key.NewBinding(key.WithKeys("ctrl+down"))):
+			if m.view == viewTargets {
+				return m.handleReorder(1)
+			}
 		}
 	}
 
@@ -355,6 +385,85 @@ func (m Model) buildModelList(t config.Target) list.Model {
 	ml.SetSize(m.width-h, m.height-v)
 
 	return ml
+}
+
+func (m Model) handleReorder(delta int) (tea.Model, tea.Cmd) {
+	item, ok := m.targetList.SelectedItem().(targetItem)
+	if !ok {
+		return m, nil
+	}
+	t := item.target
+
+	// Only moveable primary agents can be reordered
+	if t.Kind != config.KindAgent || t.Locked {
+		return m, nil
+	}
+	if t.Mode != "primary" && t.Mode != "all" {
+		return m, nil
+	}
+
+	// Extract ordered list of moveable agents from current state
+	var moveable []config.Target
+	for _, tgt := range m.state.Targets {
+		if tgt.Kind == config.KindAgent && !tgt.Locked && (tgt.Mode == "primary" || tgt.Mode == "all") {
+			moveable = append(moveable, tgt)
+		}
+	}
+
+	// Find current index
+	idx := -1
+	for i, tgt := range moveable {
+		if tgt.Name == t.Name {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return m, nil
+	}
+
+	newIdx := idx + delta
+	if newIdx < 0 || newIdx >= len(moveable) {
+		return m, nil
+	}
+
+	// Swap
+	moveable[idx], moveable[newIdx] = moveable[newIdx], moveable[idx]
+
+	// Build ordered names for SetAgentOrder (all agents in config, with moveable in new order)
+	// Collect all config-keyed agent names preserving non-moveable positions
+	names := make([]string, 0, len(moveable))
+	for _, tgt := range moveable {
+		names = append(names, tgt.Name)
+	}
+
+	// Optimistically update state order so UI moves immediately
+	newTargets := make([]config.Target, 0, len(m.state.Targets))
+	moveableIdx := 0
+	for _, tgt := range m.state.Targets {
+		if tgt.Kind == config.KindAgent && !tgt.Locked && (tgt.Mode == "primary" || tgt.Mode == "all") {
+			newTargets = append(newTargets, moveable[moveableIdx])
+			moveableIdx++
+		} else {
+			newTargets = append(newTargets, tgt)
+		}
+	}
+	m.state.Targets = newTargets
+	m = m.rebuildTargetList()
+
+	// Move cursor to follow the item
+	items := m.targetList.Items()
+	for i, it := range items {
+		if ti, ok := it.(targetItem); ok && ti.target.Name == t.Name {
+			m.targetList.Select(i)
+			break
+		}
+	}
+
+	return m, func() tea.Msg {
+		err := config.SetAgentOrder(names)
+		return reorderResultMsg{err: err}
+	}
 }
 
 func (m Model) rebuildTargetList() Model {

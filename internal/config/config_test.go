@@ -225,3 +225,136 @@ func TestSetModel(t *testing.T) {
 		t.Errorf("config should not contain model after clear, got: %s", raw)
 	}
 }
+
+func TestSetAgentOrder_ReordersKeys(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "opencode.json")
+	initial := `{
+  "agent": {
+    "build": {"model": "anthropic/claude-sonnet-4"},
+    "plan": {},
+    "scout": {"mode": "primary"},
+    "refine": {"mode": "primary"}
+  }
+}`
+	os.WriteFile(configPath, []byte(initial), 0644)
+	os.Setenv("OPENCODE_CONFIG_DIR", dir)
+	defer os.Unsetenv("OPENCODE_CONFIG_DIR")
+
+	// Reorder: refine before scout
+	err := SetAgentOrder([]string{"refine", "scout"})
+	if err != nil {
+		t.Fatalf("SetAgentOrder: %v", err)
+	}
+
+	data, _ := os.ReadFile(configPath)
+	raw := string(data)
+
+	// Verify both agents still present and in correct order
+	refineIdx := strings.Index(raw, `"refine"`)
+	scoutIdx := strings.Index(raw, `"scout"`)
+	if refineIdx < 0 || scoutIdx < 0 {
+		t.Fatalf("expected both agents in config, got: %s", raw)
+	}
+	if refineIdx > scoutIdx {
+		t.Errorf("expected refine before scout, got order: refine=%d scout=%d\nconfig: %s", refineIdx, scoutIdx, raw)
+	}
+}
+
+func TestSetAgentOrder_PreservesValues(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "opencode.json")
+	initial := `{
+  "agent": {
+    "scout": {"model": "openai/gpt-5", "mode": "primary"},
+    "refine": {"model": "anthropic/claude-opus-4"}
+  }
+}`
+	os.WriteFile(configPath, []byte(initial), 0644)
+	os.Setenv("OPENCODE_CONFIG_DIR", dir)
+	defer os.Unsetenv("OPENCODE_CONFIG_DIR")
+
+	err := SetAgentOrder([]string{"refine", "scout"})
+	if err != nil {
+		t.Fatalf("SetAgentOrder: %v", err)
+	}
+
+	data, _ := os.ReadFile(configPath)
+	raw := string(data)
+
+	if !strings.Contains(raw, `"openai/gpt-5"`) {
+		t.Errorf("scout model value should be preserved, got: %s", raw)
+	}
+	if !strings.Contains(raw, `"anthropic/claude-opus-4"`) {
+		t.Errorf("refine model value should be preserved, got: %s", raw)
+	}
+}
+
+func TestSetAgentOrder_SkipsUnknownNames(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "opencode.json")
+	initial := `{
+  "agent": {
+    "scout": {},
+    "refine": {}
+  }
+}`
+	os.WriteFile(configPath, []byte(initial), 0644)
+	os.Setenv("OPENCODE_CONFIG_DIR", dir)
+	defer os.Unsetenv("OPENCODE_CONFIG_DIR")
+
+	// includes a nonexistent name — should not error and should preserve both real agents
+	err := SetAgentOrder([]string{"refine", "nonexistent", "scout"})
+	if err != nil {
+		t.Fatalf("SetAgentOrder with unknown name: %v", err)
+	}
+
+	data, _ := os.ReadFile(configPath)
+	raw := string(data)
+
+	if !strings.Contains(raw, `"scout"`) || !strings.Contains(raw, `"refine"`) {
+		t.Errorf("both real agents should be present, got: %s", raw)
+	}
+	if strings.Contains(raw, `"nonexistent"`) {
+		t.Errorf("nonexistent agent should not be added, got: %s", raw)
+	}
+}
+
+func TestSetAgentOrder_NoOpWithEmptyAgentSection(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "opencode.json")
+	initial := `{"theme": "dark"}`
+	os.WriteFile(configPath, []byte(initial), 0644)
+	os.Setenv("OPENCODE_CONFIG_DIR", dir)
+	defer os.Unsetenv("OPENCODE_CONFIG_DIR")
+
+	err := SetAgentOrder([]string{"build", "plan"})
+	if err != nil {
+		t.Fatalf("SetAgentOrder with no agent section: %v", err)
+	}
+
+	data, _ := os.ReadFile(configPath)
+	raw := string(data)
+	// Config should be unchanged
+	if raw != initial {
+		t.Errorf("config should be unchanged when no agent section, got: %s", raw)
+	}
+}
+
+func TestBuiltInAgentsLocked(t *testing.T) {
+	raw := []byte(`{}`)
+	targets := discoverTargets("/nonexistent", raw)
+
+	for _, tgt := range targets {
+		switch tgt.Name {
+		case "build", "plan":
+			if !tgt.Locked {
+				t.Errorf("agent %q should be Locked=true", tgt.Name)
+			}
+		case "general", "explore":
+			if tgt.Locked {
+				t.Errorf("agent %q should be Locked=false", tgt.Name)
+			}
+		}
+	}
+}

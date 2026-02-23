@@ -54,15 +54,23 @@ omp
 |-----|--------|
 | `enter` | Select target / confirm model |
 | `/` | Filter the current list |
+| `ctrl+up` | Move agent up (custom primary agents only) |
+| `ctrl+down` | Move agent down (custom primary agents only) |
 | `esc` | Back to targets / quit from targets |
 | `q` | Back to targets / quit from targets |
 | `ctrl+c` | Same as `q` |
+
+### Agent ordering
+
+Custom primary agents can be reordered with `ctrl+up` / `ctrl+down`. The new order is written directly to `~/.config/opencode/opencode.json` and controls the **Tab-cycle order** in OpenCode (OpenCode uses JSON key insertion order for its agent cycle).
+
+Built-in primary agents (`build` and `plan`) are shown as `[locked]` — their cycle positions are fixed by OpenCode and cannot be changed here. Custom primary agents always appear after them in the cycle.
 
 ## How it works
 
 ### Discovery
 
-- **Built-in agents**: `build`, `plan` (primary), `general`, `explore` (subagent)
+- **Built-in agents**: `build`, `plan` (primary, locked); `general`, `explore` (subagent)
 - **JSON agents**: From `agent.*` keys in `opencode.json` (excludes system agents: `compaction`, `title`, `summary`)
 - **Markdown agents**: `~/.config/opencode/agents/*.md` and `.opencode/agents/*.md`
 - **JSON commands**: From `command.*` keys in `opencode.json`
