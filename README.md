@@ -12,7 +12,7 @@ Requires Go 1.23+.
 
 ```bash
 # Clone and install to ~/.local/bin
-git clone https://github.com/anomalyco/opencode-model-preferences.git
+git clone https://github.com/JRedeker/opencode-model-preferences.git
 cd opencode-model-preferences
 make install
 ```
@@ -22,6 +22,16 @@ Or build without installing:
 ```bash
 make build
 ./omp
+```
+
+## Update
+
+Pull the latest changes and reinstall:
+
+```bash
+cd opencode-model-preferences
+git pull
+make install
 ```
 
 ## Usage
