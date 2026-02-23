@@ -147,7 +147,15 @@ func discoverTargets(configDir string, raw []byte) []Target {
 		seen[a.Name] = true
 	}
 
-	// JSON-configured agents
+	// Markdown agents: global + project (before JSON so markdown mode wins)
+	for _, dir := range []string{
+		filepath.Join(configDir, "agents"),
+		filepath.Join(".opencode", "agents"),
+	} {
+		targets = append(targets, discoverMarkdownAgents(dir, raw, seen)...)
+	}
+
+	// JSON-configured agents (after markdown; mode here only applies to JSON-only agents)
 	gjson.GetBytes(raw, "agent").ForEach(func(name, val gjson.Result) bool {
 		n := name.String()
 		if seen[n] || systemAgents[n] {
@@ -166,14 +174,6 @@ func discoverTargets(configDir string, raw []byte) []Target {
 		seen[n] = true
 		return true
 	})
-
-	// Markdown agents: global + project
-	for _, dir := range []string{
-		filepath.Join(configDir, "agents"),
-		filepath.Join(".opencode", "agents"),
-	} {
-		targets = append(targets, discoverMarkdownAgents(dir, raw, seen)...)
-	}
 
 	// JSON-configured commands
 	gjson.GetBytes(raw, "command").ForEach(func(name, val gjson.Result) bool {

@@ -160,6 +160,71 @@ You are a security auditor.
 	}
 }
 
+// TestMarkdownModeWinsOverJSONDefault verifies that when an agent has a markdown
+// definition with an explicit mode and a JSON entry with no mode, the markdown
+// mode is used (not the JSON default of "all"). This is the librarian scenario.
+func TestMarkdownModeWinsOverJSONDefault(t *testing.T) {
+	dir := t.TempDir()
+	agentDir := filepath.Join(dir, "agents")
+	os.MkdirAll(agentDir, 0755)
+
+	// markdown defines mode: subagent
+	content := "---\ndescription: Docs researcher\nmode: subagent\n---\nYou research docs.\n"
+	os.WriteFile(filepath.Join(agentDir, "librarian.md"), []byte(content), 0644)
+
+	// JSON entry has a model override but no mode (would default to "all")
+	raw := []byte(`{
+		"agent": {
+			"librarian": {"model": "openrouter/anthropic/claude-haiku-4.5:nitro"}
+		}
+	}`)
+
+	targets := discoverTargets(dir, raw)
+
+	var librarian *Target
+	for i := range targets {
+		if targets[i].Name == "librarian" {
+			librarian = &targets[i]
+			break
+		}
+	}
+	if librarian == nil {
+		t.Fatal("librarian not found in targets")
+	}
+	if librarian.Mode != "subagent" {
+		t.Errorf("mode = %q, want subagent (markdown should win over JSON default)", librarian.Mode)
+	}
+	if librarian.Model != "openrouter/anthropic/claude-haiku-4.5:nitro" {
+		t.Errorf("model = %q, want JSON model override to be preserved", librarian.Model)
+	}
+}
+
+// TestJSONOnlyAgentDefaultsToAll verifies that a JSON-only agent with no mode
+// still defaults to "all" (no regression).
+func TestJSONOnlyAgentDefaultsToAll(t *testing.T) {
+	raw := []byte(`{
+		"agent": {
+			"scout": {"model": "openai/gpt-5"}
+		}
+	}`)
+
+	targets := discoverTargets("/nonexistent", raw)
+
+	var scout *Target
+	for i := range targets {
+		if targets[i].Name == "scout" {
+			scout = &targets[i]
+			break
+		}
+	}
+	if scout == nil {
+		t.Fatal("scout not found in targets")
+	}
+	if scout.Mode != "all" {
+		t.Errorf("mode = %q, want all for JSON-only agent with no mode", scout.Mode)
+	}
+}
+
 func TestParseFrontmatterField(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.md")
