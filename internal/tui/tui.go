@@ -5,6 +5,7 @@ package tui
 
 import (
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/anomalyco/opencode-model-preferences/internal/config"
@@ -12,6 +13,7 @@ import (
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // -- Styles ------------------------------------------------------------------
@@ -39,7 +41,7 @@ var (
 // sectionItem is a non-selectable section header in the target list.
 type sectionItem struct{ label string }
 
-func (s sectionItem) Title() string       { return sectionStyle.Render(s.label) }
+func (s sectionItem) Title() string       { return s.label }
 func (s sectionItem) Description() string { return "" }
 func (s sectionItem) FilterValue() string { return "" }
 
@@ -132,6 +134,37 @@ func buildTargetItems(targets []config.Target) []list.Item {
 	return items
 }
 
+// -- Delegate ----------------------------------------------------------------
+
+// itemDelegate wraps the default delegate but renders sectionItems as
+// styled, non-selectable section headers instead of normal list rows.
+type itemDelegate struct {
+	inner list.DefaultDelegate
+}
+
+func newDelegate() itemDelegate {
+	return itemDelegate{inner: list.NewDefaultDelegate()}
+}
+
+func (d itemDelegate) Height() int                               { return d.inner.Height() }
+func (d itemDelegate) Spacing() int                              { return d.inner.Spacing() }
+func (d itemDelegate) Update(msg tea.Msg, m *list.Model) tea.Cmd { return d.inner.Update(msg, m) }
+func (d itemDelegate) ShortHelp() []key.Binding                  { return d.inner.ShortHelp() }
+func (d itemDelegate) FullHelp() [][]key.Binding                 { return d.inner.FullHelp() }
+
+func (d itemDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
+	if s, ok := item.(sectionItem); ok {
+		if m.Width() <= 0 {
+			return
+		}
+		label := ansi.Truncate(s.label, m.Width()-4, "…")
+		rendered := sectionStyle.Render("── " + label + " ──")
+		fmt.Fprint(w, rendered) //nolint: errcheck
+		return
+	}
+	d.inner.Render(w, m, index, item)
+}
+
 // -- View state --------------------------------------------------------------
 
 type viewState int
@@ -158,7 +191,7 @@ type Model struct {
 func New(state *config.State) Model {
 	items := buildTargetItems(state.Targets)
 
-	delegate := list.NewDefaultDelegate()
+	delegate := newDelegate()
 	targetList := list.New(items, delegate, 0, 0)
 	targetList.Title = "Model Preferences"
 	targetList.Styles.Title = titleStyle
@@ -311,7 +344,7 @@ func (m Model) buildModelList(t config.Target) list.Model {
 		})
 	}
 
-	delegate := list.NewDefaultDelegate()
+	delegate := newDelegate()
 	ml := list.New(items, delegate, 0, 0)
 	ml.Title = fmt.Sprintf("Select model for: %s", t.Name)
 	ml.Styles.Title = titleStyle
