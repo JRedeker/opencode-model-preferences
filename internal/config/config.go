@@ -8,6 +8,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -81,6 +82,14 @@ func ConfigPath() string {
 }
 
 // Load reads the global config and resolves all targets and models.
+//
+// Model discovery uses a CLI-first strategy:
+//  1. Call FetchModels() to get the live model list from `opencode models`
+//  2. If the CLI call succeeds and returns at least one model, use that list
+//  3. Otherwise fall back to parsing provider.*.models from opencode.json
+//
+// This ensures the picker always reflects OpenCode's runtime model registry,
+// not just what happens to be listed in the config file.
 func Load() (*State, error) {
 	configDir := ConfigDir()
 	if configDir == "" {
@@ -94,13 +103,29 @@ func Load() (*State, error) {
 
 	state := &State{}
 
-	// 1. Discover models from provider registry
-	state.Models = discoverModels(raw)
+	// 1. Discover models: CLI-first with config fallback
+	state.Models = discoverModelsWithFallback(raw)
 
 	// 2. Discover agents: built-in + config + markdown
 	state.Targets = discoverTargets(configDir, raw)
 
 	return state, nil
+}
+
+// discoverModelsWithFallback attempts CLI-first model discovery and falls back
+// to config-based parsing when the CLI is unavailable or returns no models.
+func discoverModelsWithFallback(raw []byte) []Model {
+	models, err := FetchModels()
+	if err == nil && len(models) > 0 {
+		return models
+	}
+	// CLI unavailable or returned no parseable models — fall back to config.
+	if err != nil {
+		log.Printf("omp: CLI model discovery failed, falling back to config: %v", err)
+	} else {
+		log.Printf("omp: CLI returned no models, falling back to config parsing")
+	}
+	return discoverModels(raw)
 }
 
 // discoverModels extracts all models from provider.*.models in the config.

@@ -1,11 +1,169 @@
 package config
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+// -- CLI-first model source tests --------------------------------------------
+// These tests verify that Load uses CLI-discovered models as primary source
+// and falls back to provider.*.models config parsing when CLI fails.
+
+func TestLoad_UsesCLIModelsAsPrimarySource(t *testing.T) {
+	dir := t.TempDir()
+	// Config has one model in provider.*.models
+	configJSON := `{
+		"provider": {
+			"anthropic": {
+				"models": {
+					"claude-config-only": {"name": "Config Only Model"}
+				}
+			}
+		}
+	}`
+	os.WriteFile(filepath.Join(dir, "opencode.json"), []byte(configJSON), 0644)
+	t.Setenv("OPENCODE_CONFIG_DIR", dir)
+
+	// CLI returns a different (larger) set of models
+	withCommandRunner(t, func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		if name == "opencode" && len(args) == 1 && args[0] == "models" {
+			return []byte("anthropic/claude-cli-model-1\nanthropic/claude-cli-model-2\ngoogle/gemini-cli\n"), nil
+		}
+		return nil, nil // refresh call succeeds silently
+	})
+
+	state, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+
+	// Should have CLI models, not config-only model
+	ids := make(map[string]bool)
+	for _, m := range state.Models {
+		ids[m.ID] = true
+	}
+
+	if ids["anthropic/claude-config-only"] {
+		t.Error("config-only model should not appear when CLI returns models")
+	}
+	if !ids["anthropic/claude-cli-model-1"] {
+		t.Error("CLI model anthropic/claude-cli-model-1 should be present")
+	}
+	if !ids["anthropic/claude-cli-model-2"] {
+		t.Error("CLI model anthropic/claude-cli-model-2 should be present")
+	}
+	if !ids["google/gemini-cli"] {
+		t.Error("CLI model google/gemini-cli should be present")
+	}
+}
+
+func TestLoad_FallsBackToConfigWhenCLIFails(t *testing.T) {
+	dir := t.TempDir()
+	configJSON := `{
+		"provider": {
+			"anthropic": {
+				"models": {
+					"claude-config-fallback": {"name": "Config Fallback Model"}
+				}
+			}
+		}
+	}`
+	os.WriteFile(filepath.Join(dir, "opencode.json"), []byte(configJSON), 0644)
+	t.Setenv("OPENCODE_CONFIG_DIR", dir)
+
+	// CLI fetch fails (non-zero exit)
+	withCommandRunner(t, func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		if name == "opencode" && len(args) == 1 && args[0] == "models" {
+			return []byte("error: provider unavailable"), &execExitError{}
+		}
+		return nil, nil // refresh call succeeds
+	})
+
+	state, err := Load()
+	if err != nil {
+		t.Fatalf("Load() should not error on CLI fetch failure (fallback), got: %v", err)
+	}
+
+	ids := make(map[string]bool)
+	for _, m := range state.Models {
+		ids[m.ID] = true
+	}
+
+	if !ids["anthropic/claude-config-fallback"] {
+		t.Error("config fallback model should be present when CLI fails")
+	}
+}
+
+func TestLoad_FallsBackToConfigWhenCLIReturnsEmpty(t *testing.T) {
+	dir := t.TempDir()
+	configJSON := `{
+		"provider": {
+			"anthropic": {
+				"models": {
+					"claude-config-only": {"name": "Config Only"}
+				}
+			}
+		}
+	}`
+	os.WriteFile(filepath.Join(dir, "opencode.json"), []byte(configJSON), 0644)
+	t.Setenv("OPENCODE_CONFIG_DIR", dir)
+
+	// CLI returns empty output (no parseable models)
+	withCommandRunner(t, func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		if name == "opencode" && len(args) == 1 && args[0] == "models" {
+			return []byte(""), nil
+		}
+		return nil, nil
+	})
+
+	state, err := Load()
+	if err != nil {
+		t.Fatalf("Load() should not error on empty CLI output (fallback), got: %v", err)
+	}
+
+	ids := make(map[string]bool)
+	for _, m := range state.Models {
+		ids[m.ID] = true
+	}
+
+	if !ids["anthropic/claude-config-only"] {
+		t.Error("config model should be present when CLI returns empty output")
+	}
+}
+
+func TestLoad_CLIModelsAreSortedDeterministically(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "opencode.json"), []byte(`{}`), 0644)
+	t.Setenv("OPENCODE_CONFIG_DIR", dir)
+
+	withCommandRunner(t, func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		if name == "opencode" && len(args) == 1 && args[0] == "models" {
+			// Return in reverse order
+			return []byte("openai/gpt-5\ngoogle/gemini-2.5-pro\nanthropic/claude-sonnet-4-6\n"), nil
+		}
+		return nil, nil
+	})
+
+	state, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+
+	if len(state.Models) != 3 {
+		t.Fatalf("expected 3 models, got %d", len(state.Models))
+	}
+	if state.Models[0].ID != "anthropic/claude-sonnet-4-6" {
+		t.Errorf("models[0].ID = %q, want anthropic/claude-sonnet-4-6 (sorted)", state.Models[0].ID)
+	}
+}
+
+// execExitError is a minimal os/exec.ExitError stand-in for tests.
+type execExitError struct{}
+
+func (e *execExitError) Error() string { return "exit status 1" }
 
 func TestDiscoverModels(t *testing.T) {
 	raw := []byte(`{

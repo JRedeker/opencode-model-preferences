@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -9,6 +10,11 @@ import (
 	"github.com/anomalyco/opencode-model-preferences/internal/tui"
 	tea "github.com/charmbracelet/bubbletea"
 )
+
+var runProgram = func(m tea.Model) (tea.Model, error) {
+	p := tea.NewProgram(m, tea.WithAltScreen())
+	return p.Run()
+}
 
 func main() {
 	if err := run(os.Stderr); err != nil {
@@ -33,15 +39,16 @@ func run(w io.Writer) error {
 
 	if len(state.Models) == 0 {
 		return fmt.Errorf(
-			"no models found in provider registry\n" +
-				"  Configure providers in ~/.config/opencode/opencode.json",
+			"no models found via opencode CLI or provider config\n" +
+				"  Ensure 'opencode models' works, or configure providers in ~/.config/opencode/opencode.json",
 		)
 	}
 
 	m := tui.New(state)
-	p := tea.NewProgram(m, tea.WithAltScreen())
-
-	if _, err := p.Run(); err != nil {
+	if _, err := runProgram(m); err != nil {
+		if errors.Is(err, tea.ErrInterrupted) || errors.Is(err, tea.ErrProgramKilled) {
+			return nil
+		}
 		return fmt.Errorf("running TUI: %w", err)
 	}
 	return nil

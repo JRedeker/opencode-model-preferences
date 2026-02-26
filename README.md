@@ -42,6 +42,15 @@ Run `omp` from any directory:
 omp
 ```
 
+### openchad tmux popup workflow
+
+When running inside openchad, press `Ctrl+b m` to open `omp` in a tmux popup (`display-popup -EE`, default 80%x80%).
+
+- `q`, `esc`, and `ctrl+c` are treated as graceful closes (exit code 0).
+- Successful exits close the popup automatically.
+- Non-zero exits stay visible in the popup for debugging.
+- Preference changes apply on the next OpenCode agent/command invocation.
+
 ### Flow
 
 1. **Target list** - Browse agents and commands grouped by type (primary agents, subagents, commands). Each entry shows its current model preference or "(default)".
@@ -87,7 +96,7 @@ If the refresh fails, `omp` exits immediately with an actionable error:
 - **JSON agents**: From `agent.*` keys in `opencode.json` (excludes system agents: `compaction`, `title`, `summary`); only adds agents not already defined by a markdown file. JSON `model` overrides are always applied regardless of which source defined the agent.
 - **JSON commands**: From `command.*` keys in `opencode.json`
 - **Markdown commands**: `~/.config/opencode/commands/*.md` and `.opencode/commands/*.md`
-- **Models**: All entries under `provider.*.models` in `opencode.json`
+- **Models**: CLI-first discovery via `opencode models` output, with fallback to `provider.*.models` entries in `opencode.json` when the CLI is unavailable or returns no parseable models. This ensures the picker always shows OpenCode's runtime model registry.
 
 > **Precedence note**: if an agent is defined in both a markdown file and `opencode.json`, the markdown `mode` wins. This means an agent with `mode: subagent` in its `.md` file correctly appears under Sub-Agents even if the JSON entry has no `mode` field.
 
