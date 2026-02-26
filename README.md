@@ -68,6 +68,18 @@ Built-in primary agents (`build` and `plan`) are shown as `[locked]` — their c
 
 ## How it works
 
+### Startup model refresh
+
+On every launch, `omp` runs `opencode models --refresh` before loading the config. This ensures the model picker always reflects the latest models from your configured providers (including any newly added or removed models).
+
+If the refresh fails, `omp` exits immediately with an actionable error:
+
+| Failure | Error message |
+|---------|--------------|
+| `opencode` not in PATH | `opencode binary not found in PATH` |
+| Non-zero exit (auth/network) | `opencode models --refresh failed: …` + command output |
+| Timeout (>30s) | `opencode models --refresh timed out after 30s` |
+
 ### Discovery
 
 - **Built-in agents**: `build`, `plan` (primary, locked); `general`, `explore` (subagent)
