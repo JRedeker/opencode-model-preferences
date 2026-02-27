@@ -1,0 +1,110 @@
+{
+  "$schema": "https://raw.githubusercontent.com/anomalyco/oc-plugins/main/advance/plugin/schemas/spec.schema.json",
+  "name": "openchad-tmux-integration",
+  "title": "Openchad Tmux Integration",
+  "purpose": "Capability: Openchad Tmux Integration",
+  "version": "1.0.0",
+  "updated_at": "2026-02-27T00:31:12.492Z",
+  "requirements": [
+    {
+      "id": "rq-ompPopupBind",
+      "title": "Tmux popup keybinding launches omp from OpenCode session",
+      "body": "open-chad must provide a tmux keybinding that opens omp in a popup from within an active OpenCode session using display-popup -EE so successful runs close automatically and failures remain visible.",
+      "priority": "must",
+      "tags": [
+        "tmux",
+        "integration",
+        "ux"
+      ],
+      "scenarios": [
+        {
+          "id": "rq-ompPopupBind.1",
+          "title": "Open popup from active OpenCode session",
+          "given": [
+            "an active open-chad tmux session is running OpenCode",
+            "tmux version is 3.2 or newer"
+          ],
+          "when": "the user presses prefix+m",
+          "then": [
+            "a tmux popup opens and runs omp",
+            "the popup default size is 80%x80% unless overridden"
+          ]
+        },
+        {
+          "id": "rq-ompPopupBind.2",
+          "title": "Successful omp run closes popup",
+          "given": [
+            "omp is launched inside the popup"
+          ],
+          "when": "the user exits omp successfully",
+          "then": [
+            "the popup closes automatically",
+            "focus returns to the previous OpenCode pane"
+          ]
+        },
+        {
+          "id": "rq-ompPopupBind.3",
+          "title": "Failed omp run remains visible",
+          "given": [
+            "omp exits with a non-zero status"
+          ],
+          "when": "the popup command finishes",
+          "then": [
+            "the popup remains visible",
+            "failure output is visible for diagnosis"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "rq-ompGracefulExit",
+      "title": "Popup flow preserves graceful user-close semantics",
+      "body": "omp must treat user-initiated close actions (q, esc, ctrl+c) as graceful exits with status code 0 so popup usage does not produce error flashes.",
+      "priority": "must",
+      "tags": [
+        "omp",
+        "exit-handling",
+        "bubbletea"
+      ],
+      "scenarios": [
+        {
+          "id": "rq-ompGracefulExit.1",
+          "title": "User quits with q or esc",
+          "given": [
+            "omp is running in a tmux popup"
+          ],
+          "when": "the user presses q or esc",
+          "then": [
+            "omp exits with status code 0",
+            "the popup closes and returns focus to OpenCode"
+          ]
+        },
+        {
+          "id": "rq-ompGracefulExit.2",
+          "title": "User interrupts with ctrl+c",
+          "given": [
+            "omp is running in a tmux popup"
+          ],
+          "when": "the user presses ctrl+c",
+          "then": [
+            "omp exits with status code 0",
+            "no error banner or failure flash is shown"
+          ]
+        },
+        {
+          "id": "rq-ompGracefulExit.3",
+          "title": "Preference changes apply on next invocation",
+          "given": [
+            "a user updates an agent or command model in omp",
+            "omp exits successfully"
+          ],
+          "when": "the user invokes that agent or command in OpenCode",
+          "then": [
+            "the updated model preference is read from ~/.config/opencode/opencode.json",
+            "the new model is used on the next invocation"
+          ]
+        }
+      ]
+    }
+  ]
+}
