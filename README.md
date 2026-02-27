@@ -44,7 +44,7 @@ omp
 
 ### openchad tmux popup workflow
 
-When running inside openchad, press `Ctrl+b m` to open `omp` in a tmux popup (`display-popup -EE`, default 80%x80%).
+When running inside openchad, press `Ctrl+b m` to open `omp` in a tmux popup (`display-popup -EE`, default 80%x80%). Override the popup size with `OPEN_CHAD_OMP_POPUP_SIZE` (e.g. `export OPEN_CHAD_OMP_POPUP_SIZE="90%x85%"`).
 
 - `q`, `esc`, and `ctrl+c` are treated as graceful closes (exit code 0).
 - Successful exits close the popup automatically.

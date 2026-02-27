@@ -43,14 +43,14 @@ func TestView_80x80_TargetListRendersKeyContent(t *testing.T) {
 		},
 	})
 
-	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 40})
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 80})
 	rendered := updated.(Model).View()
 
 	if !strings.Contains(rendered, "Model Preferences") {
-		t.Fatalf("expected target list title in 80x40 render")
+		t.Fatalf("expected target list title in 80x80 render")
 	}
 	if !strings.Contains(rendered, "build") {
-		t.Fatalf("expected target entry in 80x40 render")
+		t.Fatalf("expected target entry in 80x80 render")
 	}
 }
 
@@ -64,7 +64,7 @@ func TestView_80x80_ModelPickerRendersModelEntry(t *testing.T) {
 		},
 	})
 
-	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 40})
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 80})
 	m2 := updated.(Model)
 	m2.targetList.Select(1)
 
@@ -72,9 +72,9 @@ func TestView_80x80_ModelPickerRendersModelEntry(t *testing.T) {
 	rendered := updated.(Model).View()
 
 	if !strings.Contains(rendered, "Select model for: build") {
-		t.Fatalf("expected model picker title in 80x40 render")
+		t.Fatalf("expected model picker title in 80x80 render")
 	}
 	if !strings.Contains(rendered, "openai/gpt-5.3-codex") {
-		t.Fatalf("expected model entry in 80x40 render")
+		t.Fatalf("expected model entry in 80x80 render")
 	}
 }
