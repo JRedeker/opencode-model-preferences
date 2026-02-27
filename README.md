@@ -1,4 +1,4 @@
-# omp - OpenCode Model Preferences
+# omp — OpenCode Model Preferences
 
 A standalone TUI for managing per-agent and per-command model preferences in [OpenCode](https://github.com/anomalyco/opencode).
 
@@ -42,20 +42,27 @@ Run `omp` from any directory:
 omp
 ```
 
-### openchad tmux popup workflow
+### openchad tmux popup
 
-When running inside openchad, press `Ctrl+b m` to open `omp` in a tmux popup (`display-popup -EE`, default 80%x80%). Override the popup size with `OPEN_CHAD_OMP_POPUP_SIZE` (e.g. `export OPEN_CHAD_OMP_POPUP_SIZE="90%x85%"`).
+When running inside openchad, press `Ctrl+b m` to open `omp` in a tmux popup (`display-popup -EE`, default 80%×80%). Requires tmux ≥3.2.
+
+Override the popup size with `OPEN_CHAD_OMP_POPUP_SIZE`:
+
+```bash
+export OPEN_CHAD_OMP_POPUP_SIZE="90%x85%"   # percent
+export OPEN_CHAD_OMP_POPUP_SIZE="120x40"    # absolute cells
+```
 
 - `q`, `esc`, and `ctrl+c` are treated as graceful closes (exit code 0).
 - Successful exits close the popup automatically.
 - Non-zero exits stay visible in the popup for debugging.
-- Preference changes apply on the next OpenCode agent/command invocation.
+- Preference changes apply on the next OpenCode agent/command invocation — no restart needed.
 
 ### Flow
 
-1. **Target list** - Browse agents and commands grouped by type (primary agents, subagents, commands). Each entry shows its current model preference or "(default)".
-2. **Model picker** - Select a model from all providers in your config, or choose "(clear preference)" to remove the override.
-3. **Write** - The preference is written to `~/.config/opencode/opencode.json` and the list refreshes.
+1. **Target list** — Browse agents and commands grouped by type (primary agents, subagents, commands). Each entry shows its current model preference or `(default)`.
+2. **Model picker** — Select a model from all providers in your config, or choose `(clear preference)` to remove the override.
+3. **Write** — The preference is written to `~/.config/opencode/opencode.json` and the list refreshes.
 
 ### Keybinds
 
@@ -109,6 +116,7 @@ Uses [tidwall/sjson](https://github.com/tidwall/sjson) for surgical JSON path up
 | Variable | Purpose |
 |----------|---------|
 | `OPENCODE_CONFIG_DIR` | Override config directory (default: `~/.config/opencode`) |
+| `OPEN_CHAD_OMP_POPUP_SIZE` | Override tmux popup size when launched via openchad (default: `80%x80%`) |
 
 ## Development
 
