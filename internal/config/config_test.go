@@ -318,6 +318,84 @@ You are a security auditor.
 	}
 }
 
+func TestDiscoverTargets_FindsProjectMarkdownAgentsFromNestedDir(t *testing.T) {
+	root := t.TempDir()
+	agentDir := filepath.Join(root, ".opencode", "agents")
+	if err := os.MkdirAll(agentDir, 0755); err != nil {
+		t.Fatalf("mkdir agent dir: %v", err)
+	}
+
+	content := `---
+description: Docs researcher
+mode: subagent
+---
+
+You research docs.
+`
+	if err := os.WriteFile(filepath.Join(agentDir, "librarian.md"), []byte(content), 0644); err != nil {
+		t.Fatalf("write librarian.md: %v", err)
+	}
+
+	nested := filepath.Join(root, "nested", "workspace")
+	if err := os.MkdirAll(nested, 0755); err != nil {
+		t.Fatalf("mkdir nested dir: %v", err)
+	}
+
+	oldWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	defer func() {
+		_ = os.Chdir(oldWD)
+	}()
+	if err := os.Chdir(nested); err != nil {
+		t.Fatalf("chdir nested: %v", err)
+	}
+
+	targets := discoverTargets("/nonexistent", []byte(`{}`))
+
+	var librarian *Target
+	for i := range targets {
+		if targets[i].Name == "librarian" {
+			librarian = &targets[i]
+			break
+		}
+	}
+	if librarian == nil {
+		t.Fatal("librarian not found; expected project .opencode agent to be discovered")
+	}
+	if librarian.Mode != "subagent" {
+		t.Errorf("mode = %q, want subagent", librarian.Mode)
+	}
+}
+
+func TestDiscoverTargets_UsesOPENCODEPROJECTDIRForMarkdownAgents(t *testing.T) {
+	root := t.TempDir()
+	agentDir := filepath.Join(root, ".opencode", "agents")
+	if err := os.MkdirAll(agentDir, 0755); err != nil {
+		t.Fatalf("mkdir agent dir: %v", err)
+	}
+
+	content := "---\nmode: subagent\n---\n"
+	if err := os.WriteFile(filepath.Join(agentDir, "reviewer.md"), []byte(content), 0644); err != nil {
+		t.Fatalf("write reviewer.md: %v", err)
+	}
+
+	t.Setenv("OPENCODE_PROJECT_DIR", root)
+	targets := discoverTargets("/nonexistent", []byte(`{}`))
+
+	found := false
+	for _, t := range targets {
+		if t.Name == "reviewer" && t.Mode == "subagent" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("expected reviewer subagent from OPENCODE_PROJECT_DIR/.opencode/agents")
+	}
+}
+
 // TestMarkdownModeWinsOverJSONDefault verifies that when an agent has a markdown
 // definition with an explicit mode and a JSON entry with no mode, the markdown
 // mode is used (not the JSON default of "all"). This is the librarian scenario.

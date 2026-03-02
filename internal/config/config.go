@@ -164,6 +164,7 @@ func discoverModels(raw []byte) []Model {
 func discoverTargets(configDir string, raw []byte) []Target {
 	seen := make(map[string]bool)
 	var targets []Target
+	projectDir := discoverProjectOpencodeDir()
 
 	// Built-in agents
 	for _, a := range builtinAgents {
@@ -173,10 +174,7 @@ func discoverTargets(configDir string, raw []byte) []Target {
 	}
 
 	// Markdown agents: global + project (before JSON so markdown mode wins)
-	for _, dir := range []string{
-		filepath.Join(configDir, "agents"),
-		filepath.Join(".opencode", "agents"),
-	} {
+	for _, dir := range listAgentDirs(configDir, projectDir) {
 		targets = append(targets, discoverMarkdownAgents(dir, raw, seen)...)
 	}
 
@@ -213,14 +211,52 @@ func discoverTargets(configDir string, raw []byte) []Target {
 	})
 
 	// Markdown commands: global + project
-	for _, dir := range []string{
-		filepath.Join(configDir, "commands"),
-		filepath.Join(".opencode", "commands"),
-	} {
+	for _, dir := range listCommandDirs(configDir, projectDir) {
 		targets = append(targets, discoverMarkdownCommands(dir, raw, seen)...)
 	}
 
 	return targets
+}
+
+func listAgentDirs(configDir, projectDir string) []string {
+	dirs := []string{filepath.Join(configDir, "agents")}
+	if projectDir != "" {
+		dirs = append(dirs, filepath.Join(projectDir, "agents"))
+	}
+	return dirs
+}
+
+func listCommandDirs(configDir, projectDir string) []string {
+	dirs := []string{filepath.Join(configDir, "commands")}
+	if projectDir != "" {
+		dirs = append(dirs, filepath.Join(projectDir, "commands"))
+	}
+	return dirs
+}
+
+func discoverProjectOpencodeDir() string {
+	if project := os.Getenv("OPENCODE_PROJECT_DIR"); project != "" {
+		return filepath.Join(project, ".opencode")
+	}
+
+	wd, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+
+	current := wd
+	for {
+		candidate := filepath.Join(current, ".opencode")
+		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+			return candidate
+		}
+
+		parent := filepath.Dir(current)
+		if parent == current {
+			return ""
+		}
+		current = parent
+	}
 }
 
 // discoverMarkdownAgents scans a directory for *.md agent definitions.

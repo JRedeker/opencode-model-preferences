@@ -99,10 +99,10 @@ If the refresh fails, `omp` exits immediately with an actionable error:
 ### Discovery
 
 - **Built-in agents**: `build`, `plan` (primary, locked); `general`, `explore` (subagent)
-- **Markdown agents**: `~/.config/opencode/agents/*.md` and `.opencode/agents/*.md` — discovered first; `mode` from frontmatter takes precedence
+- **Markdown agents**: `~/.config/opencode/agents/*.md` and project `.opencode/agents/*.md` — discovered first; `mode` from frontmatter takes precedence. Project discovery uses `OPENCODE_PROJECT_DIR` when set, otherwise it walks up from the current working directory to find the nearest `.opencode/`.
 - **JSON agents**: From `agent.*` keys in `opencode.json` (excludes system agents: `compaction`, `title`, `summary`); only adds agents not already defined by a markdown file. JSON `model` overrides are always applied regardless of which source defined the agent.
 - **JSON commands**: From `command.*` keys in `opencode.json`
-- **Markdown commands**: `~/.config/opencode/commands/*.md` and `.opencode/commands/*.md`
+- **Markdown commands**: `~/.config/opencode/commands/*.md` and project `.opencode/commands/*.md` (same project discovery rules as agents)
 - **Models**: CLI-first discovery via `opencode models` output, with fallback to `provider.*.models` entries in `opencode.json` when the CLI is unavailable or returns no parseable models. This ensures the picker always shows OpenCode's runtime model registry.
 
 > **Precedence note**: if an agent is defined in both a markdown file and `opencode.json`, the markdown `mode` wins. This means an agent with `mode: subagent` in its `.md` file correctly appears under Sub-Agents even if the JSON entry has no `mode` field.
@@ -116,6 +116,7 @@ Uses [tidwall/sjson](https://github.com/tidwall/sjson) for surgical JSON path up
 | Variable | Purpose |
 |----------|---------|
 | `OPENCODE_CONFIG_DIR` | Override config directory (default: `~/.config/opencode`) |
+| `OPENCODE_PROJECT_DIR` | Override project root used for `.opencode/agents` and `.opencode/commands` discovery |
 | `OPEN_CHAD_OMP_POPUP_SIZE` | Override tmux popup size when launched via openchad (default: `80%x80%`) |
 
 ## Development
