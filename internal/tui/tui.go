@@ -1,10 +1,13 @@
 // Package tui implements the Bubbletea TUI for model routing management.
 //
-// Flow: mapping list → (new/edit mapping via huh form) → activate mapping → back to list.
+// Two views:
+//   - Agents view: list of agents/commands with current model and assigned role.
+//     Press 'r' to assign a role, 'a' to apply routing to opencode.json.
+//   - Roles view: list of 5 roles with their mapped model.
+//     Press 'enter' to pick a model for a role.
 //
-// A "mapping" pairs a name with an orchestrator model (applied to primary/all
-// agents and commands) and a worker model (applied to subagents). Activating a
-// mapping writes those models to opencode.json via ApplyActiveMapping.
+// Roles are purely for model mapping — they carry no context or system prompt.
+// If a role has no model mapped, targets assigned to it keep their existing model.
 package tui
 
 import (
@@ -40,9 +43,11 @@ var (
 			Bold(true).
 			PaddingTop(1)
 
-	warningStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FAB387")).
-			Italic(true)
+	roleStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#CBA6F7")).
+			Bold(true)
+
+	faintStyle = lipgloss.NewStyle().Faint(true)
 )
 
 // -- List items --------------------------------------------------------------
@@ -54,37 +59,79 @@ func (s sectionItem) Title() string       { return s.label }
 func (s sectionItem) Description() string { return "" }
 func (s sectionItem) FilterValue() string { return "" }
 
-// mappingItem wraps a config.Mapping for the list.
-type mappingItem struct {
-	mapping config.Mapping
+// targetItem wraps a config.Target for the agents list.
+type targetItem struct {
+	target config.Target
+	role   string // assigned role label, or "(none)"
 }
 
-func (m mappingItem) Title() string { return m.mapping.Name }
-func (m mappingItem) Description() string {
-	return fmt.Sprintf("orchestrator: %s | worker: %s", m.mapping.Orchestrator, m.mapping.Worker)
+func (t targetItem) Title() string { return t.target.Name }
+func (t targetItem) Description() string {
+	model := t.target.Model
+	if model == "" {
+		model = "(no model)"
+	}
+	return fmt.Sprintf("model: %s  role: %s", model, t.role)
 }
-func (m mappingItem) FilterValue() string {
-	return m.mapping.Name + " " + m.mapping.Orchestrator + " " + m.mapping.Worker
+func (t targetItem) FilterValue() string {
+	return t.target.Name + " " + t.target.Model + " " + t.role
 }
 
-// newMappingItem is the special "create new mapping" entry.
-type newMappingItem struct{}
+// roleItem wraps a UserRole for the roles list.
+type roleItem struct {
+	role  config.UserRole
+	model string // mapped model, or "(unmapped)"
+	desc  string
+}
 
-func (n newMappingItem) Title() string       { return "(+ new mapping)" }
-func (n newMappingItem) Description() string { return "Create a new orchestrator/worker model pair" }
-func (n newMappingItem) FilterValue() string { return "new create" }
+func (r roleItem) Title() string       { return string(r.role) }
+func (r roleItem) Description() string { return fmt.Sprintf("%s  →  %s", r.desc, r.model) }
+func (r roleItem) FilterValue() string { return string(r.role) + " " + r.model }
 
-// buildMappingItems constructs the list items for the mapping list view.
-func buildMappingItems(rc config.RoutingConfig) []list.Item {
-	var items []list.Item
-	if len(rc.Mappings) > 0 {
-		items = append(items, sectionItem{"Saved Mappings"})
-		for _, m := range rc.Mappings {
-			items = append(items, mappingItem{mapping: m})
+// -- Item builders -----------------------------------------------------------
+
+func buildTargetItems(targets []config.Target, routing config.RoutingConfig) []list.Item {
+	var agents, commands []list.Item
+	for _, t := range targets {
+		if t.Hidden {
+			continue
+		}
+		roleName := "(none)"
+		if r, ok := routing.TargetRoles[t.Name]; ok {
+			roleName = string(r)
+		}
+		item := targetItem{target: t, role: roleName}
+		if t.Kind == config.KindCommand {
+			commands = append(commands, item)
+		} else {
+			agents = append(agents, item)
 		}
 	}
-	items = append(items, sectionItem{"Actions"})
-	items = append(items, newMappingItem{})
+	var items []list.Item
+	if len(agents) > 0 {
+		items = append(items, sectionItem{"Agents"})
+		items = append(items, agents...)
+	}
+	if len(commands) > 0 {
+		items = append(items, sectionItem{"Commands"})
+		items = append(items, commands...)
+	}
+	return items
+}
+
+func buildRoleItems(routing config.RoutingConfig) []list.Item {
+	var items []list.Item
+	for _, r := range config.AllUserRoles() {
+		model := "(unmapped)"
+		if m, ok := routing.RoleModels[r]; ok && m != "" {
+			model = m
+		}
+		items = append(items, roleItem{
+			role:  r,
+			model: model,
+			desc:  config.UserRoleDescription(r),
+		})
+	}
 	return items
 }
 
@@ -122,24 +169,26 @@ func (d itemDelegate) Render(w io.Writer, m list.Model, index int, item list.Ite
 type viewState int
 
 const (
-	viewMappings viewState = iota // mapping list
-	viewForm                      // huh form for create/edit
+	viewAgents viewState = iota // agent/command list
+	viewRoles                   // role→model list
+	viewForm                    // huh form (role picker or model picker)
 )
 
 // -- Messages ----------------------------------------------------------------
 
-type activateResultMsg struct {
-	err     error
-	mapping config.Mapping
+type applyResultMsg struct{ err error }
+type saveRoutingMsg struct{ err error }
+
+type rolePickDoneMsg struct {
+	targetName string
+	role       config.UserRole
+	cleared    bool // true = user chose to clear the role
 }
 
-type saveRoutingResultMsg struct {
-	err error
-}
-
-type formDoneMsg struct {
-	mapping config.Mapping
-	saved   bool // false = cancelled
+type modelPickDoneMsg struct {
+	role    config.UserRole
+	model   string
+	cleared bool
 }
 
 // -- Model -------------------------------------------------------------------
@@ -150,41 +199,45 @@ type Model struct {
 	routing config.RoutingConfig
 	view    viewState
 
-	mappingList list.Model
-	form        *huh.Form
+	agentList list.Model
+	roleList  list.Model
+	form      *huh.Form
 
-	// form field values (bound to huh)
-	formName         string
-	formOrchestrator string
-	formWorker       string
-	editIdx          int // -1 = new, >=0 = editing existing
+	// form context
+	formRoleValue  string          // bound to huh select for role picker
+	formModelValue string          // bound to huh select for model picker
+	formTargetName string          // which target we're assigning a role to
+	formRole       config.UserRole // which role we're assigning a model to
 
-	// pendingActivate holds a mapping awaiting confirmation when existing
-	// per-target model prefs would be overwritten.
-	pendingActivate *config.Mapping
-
-	status   string
-	warnings []string
-	width    int
-	height   int
+	status string
+	width  int
+	height int
 }
 
 // New creates the initial TUI model.
 func New(state *config.State, routing config.RoutingConfig) Model {
-	items := buildMappingItems(routing)
 	delegate := newDelegate()
-	ml := list.New(items, delegate, 0, 0)
-	ml.Title = "Model Routing"
-	ml.Styles.Title = titleStyle
-	ml.SetShowStatusBar(true)
-	ml.SetFilteringEnabled(true)
+
+	agentItems := buildTargetItems(state.Targets, routing)
+	al := list.New(agentItems, delegate, 0, 0)
+	al.Title = "Agents & Commands"
+	al.Styles.Title = titleStyle
+	al.SetShowStatusBar(true)
+	al.SetFilteringEnabled(true)
+
+	roleItems := buildRoleItems(routing)
+	rl := list.New(roleItems, delegate, 0, 0)
+	rl.Title = "Role → Model Mapping"
+	rl.Styles.Title = titleStyle
+	rl.SetShowStatusBar(false)
+	rl.SetFilteringEnabled(false)
 
 	return Model{
-		state:       state,
-		routing:     routing,
-		view:        viewMappings,
-		mappingList: ml,
-		editIdx:     -1,
+		state:     state,
+		routing:   routing,
+		view:      viewAgents,
+		agentList: al,
+		roleList:  rl,
 	}
 }
 
@@ -200,227 +253,160 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		h, v := appStyle.GetFrameSize()
-		m.mappingList.SetSize(msg.Width-h, msg.Height-v)
+		m.agentList.SetSize(msg.Width-h, msg.Height-v)
+		m.roleList.SetSize(msg.Width-h, msg.Height-v)
 		return m, nil
 
-	case activateResultMsg:
+	case applyResultMsg:
 		if msg.err != nil {
-			m.status = fmt.Sprintf("Error activating: %v", msg.err)
+			m.status = fmt.Sprintf("Error applying: %v", msg.err)
 		} else {
-			m.status = fmt.Sprintf("Activated mapping '%s'", msg.mapping.Name)
-			// Refresh in-memory target models so subsequent activation checks
-			// reflect the newly applied values (avoids false "will overwrite" warnings).
-			m.refreshTargetModels(msg.mapping)
+			m.status = "Routing applied to opencode.json"
 		}
-		m.view = viewMappings
 		return m, nil
 
-	case saveRoutingResultMsg:
+	case saveRoutingMsg:
 		if msg.err != nil {
 			m.status = fmt.Sprintf("Error saving: %v", msg.err)
-		} else {
-			m.status = "Mapping saved"
 		}
-		m.view = viewMappings
-		m.rebuildMappingList()
 		return m, nil
 
-	case formDoneMsg:
-		if !msg.saved {
-			m.view = viewMappings
-			m.status = ""
-			return m, nil
-		}
-		// Save the mapping
-		mapping := msg.mapping
-		routing := m.routing
-		if m.editIdx >= 0 && m.editIdx < len(routing.Mappings) {
-			routing.Mappings[m.editIdx] = mapping
+	case rolePickDoneMsg:
+		if msg.cleared {
+			delete(m.routing.TargetRoles, msg.targetName)
 		} else {
-			routing.Mappings = append(routing.Mappings, mapping)
+			m.routing.TargetRoles[msg.targetName] = msg.role
 		}
-		m.routing = routing
-		return m, func() tea.Msg {
-			err := config.SaveRouting(routing)
-			return saveRoutingResultMsg{err: err}
+		m.view = viewAgents
+		m.rebuildAgentList()
+		m.status = fmt.Sprintf("Set %s → %s", msg.targetName, msg.role)
+		return m, m.saveRoutingCmd()
+
+	case modelPickDoneMsg:
+		if msg.cleared {
+			delete(m.routing.RoleModels, msg.role)
+		} else {
+			m.routing.RoleModels[msg.role] = msg.model
 		}
+		m.view = viewRoles
+		m.rebuildRoleList()
+		m.status = fmt.Sprintf("Set %s → %s", msg.role, msg.model)
+		return m, m.saveRoutingCmd()
 
 	case tea.KeyMsg:
 		if m.view == viewForm {
-			// Form handles its own keys
-			break
+			break // form handles its own keys
 		}
-		if m.view == viewMappings && m.mappingList.FilterState() == list.Filtering {
+		if m.activeList().FilterState() == list.Filtering {
 			break
 		}
 
 		switch {
-		case key.Matches(msg, key.NewBinding(key.WithKeys("q", "ctrl+c", "esc"))):
-			if m.pendingActivate != nil {
-				// Cancel pending activation
-				m.pendingActivate = nil
-				m.status = "Activation cancelled"
+		case key.Matches(msg, key.NewBinding(key.WithKeys("q", "ctrl+c"))):
+			return m, tea.Quit
+
+		case key.Matches(msg, key.NewBinding(key.WithKeys("esc"))):
+			if m.view == viewRoles {
+				m.view = viewAgents
 				return m, nil
 			}
 			return m, tea.Quit
 
-		case key.Matches(msg, key.NewBinding(key.WithKeys("enter"))):
-			m.pendingActivate = nil // cancel any pending activation on navigation
-			return m.handleSelect()
+		case key.Matches(msg, key.NewBinding(key.WithKeys("tab"))):
+			if m.view == viewAgents {
+				m.view = viewRoles
+			} else if m.view == viewRoles {
+				m.view = viewAgents
+			}
+			m.status = ""
+			return m, nil
 
-		case key.Matches(msg, key.NewBinding(key.WithKeys("a"))):
-			// 'a' activates the selected mapping (or confirms pending activation)
-			if m.view == viewMappings {
-				if m.pendingActivate != nil {
-					// Second press: confirmed — apply
-					mapping := *m.pendingActivate
-					m.pendingActivate = nil
-					targets := m.state.Targets
-					return m, func() tea.Msg {
-						err := config.ApplyActiveMapping(mapping, targets)
-						return activateResultMsg{err: err, mapping: mapping}
-					}
-				}
-				return m.handleActivate()
+		case key.Matches(msg, key.NewBinding(key.WithKeys("r"))):
+			if m.view == viewAgents {
+				return m.openRolePicker()
 			}
 
-		case key.Matches(msg, key.NewBinding(key.WithKeys("d"))):
-			// 'd' deletes the selected mapping
-			if m.view == viewMappings {
-				return m.handleDelete()
+		case key.Matches(msg, key.NewBinding(key.WithKeys("enter"))):
+			if m.view == viewRoles {
+				return m.openModelPicker()
+			}
+
+		case key.Matches(msg, key.NewBinding(key.WithKeys("a"))):
+			if m.view == viewAgents {
+				return m.applyRouting()
 			}
 		}
 	}
 
 	// Delegate to active view
 	var cmd tea.Cmd
-	if m.view == viewMappings {
-		m.mappingList, cmd = m.mappingList.Update(msg)
-	} else if m.view == viewForm && m.form != nil {
-		form, fCmd := m.form.Update(msg)
-		if f, ok := form.(*huh.Form); ok {
-			m.form = f
-		}
-		if m.form.State == huh.StateCompleted {
-			return m, func() tea.Msg {
-				return formDoneMsg{
-					mapping: config.Mapping{
-						Name:         m.formName,
-						Orchestrator: m.formOrchestrator,
-						Worker:       m.formWorker,
-					},
-					saved: true,
+	switch m.view {
+	case viewAgents:
+		m.agentList, cmd = m.agentList.Update(msg)
+	case viewRoles:
+		m.roleList, cmd = m.roleList.Update(msg)
+	case viewForm:
+		if m.form != nil {
+			form, fCmd := m.form.Update(msg)
+			if f, ok := form.(*huh.Form); ok {
+				m.form = f
+			}
+			if m.form.State == huh.StateCompleted {
+				return m, m.handleFormComplete()
+			}
+			if m.form.State == huh.StateAborted {
+				// Return to previous view
+				if m.formTargetName != "" {
+					m.view = viewAgents
+				} else {
+					m.view = viewRoles
 				}
+				m.status = ""
+				return m, nil
 			}
+			cmd = fCmd
 		}
-		if m.form.State == huh.StateAborted {
-			return m, func() tea.Msg {
-				return formDoneMsg{saved: false}
-			}
-		}
-		cmd = fCmd
 	}
 	return m, cmd
 }
 
-func (m Model) handleSelect() (tea.Model, tea.Cmd) {
-	switch item := m.mappingList.SelectedItem().(type) {
-	case newMappingItem:
-		return m.openForm(-1, config.Mapping{})
-	case mappingItem:
-		// Enter on a mapping: open edit form
-		idx := m.findMappingIdx(item.mapping.Name)
-		return m.openForm(idx, item.mapping)
+func (m *Model) activeList() *list.Model {
+	if m.view == viewRoles {
+		return &m.roleList
 	}
-	return m, nil
+	return &m.agentList
 }
 
-func (m Model) handleActivate() (tea.Model, tea.Cmd) {
-	item, ok := m.mappingList.SelectedItem().(mappingItem)
+// openRolePicker opens a huh form to assign a role to the selected agent.
+func (m Model) openRolePicker() (tea.Model, tea.Cmd) {
+	item, ok := m.agentList.SelectedItem().(targetItem)
 	if !ok {
 		return m, nil
 	}
-	mapping := item.mapping
 
-	// Check if any targets already have a model set — warn before overwriting.
-	var existing []string
-	for _, t := range m.state.Targets {
-		if t.Model != "" {
-			existing = append(existing, t.Name)
-		}
+	opts := []huh.Option[string]{
+		huh.NewOption("(none — clear role)", ""),
 	}
-	if len(existing) > 0 {
-		m.pendingActivate = &mapping
-		m.status = fmt.Sprintf(
-			"⚠ Will overwrite existing model prefs for: %s — press 'a' again to confirm, any other key to cancel",
-			strings.Join(existing, ", "),
-		)
-		return m, nil
+	for _, r := range config.AllUserRoles() {
+		label := fmt.Sprintf("%s — %s", r, config.UserRoleDescription(r))
+		opts = append(opts, huh.NewOption(label, string(r)))
 	}
 
-	targets := m.state.Targets
-	return m, func() tea.Msg {
-		err := config.ApplyActiveMapping(mapping, targets)
-		return activateResultMsg{err: err, mapping: mapping}
-	}
-}
-
-func (m Model) handleDelete() (tea.Model, tea.Cmd) {
-	item, ok := m.mappingList.SelectedItem().(mappingItem)
-	if !ok {
-		return m, nil
-	}
-	idx := m.findMappingIdx(item.mapping.Name)
-	if idx < 0 {
-		return m, nil
-	}
-	routing := m.routing
-	routing.Mappings = append(routing.Mappings[:idx], routing.Mappings[idx+1:]...)
-	m.routing = routing
-	m.rebuildMappingList()
-	return m, func() tea.Msg {
-		err := config.SaveRouting(routing)
-		return saveRoutingResultMsg{err: err}
-	}
-}
-
-func (m Model) findMappingIdx(name string) int {
-	for i, mp := range m.routing.Mappings {
-		if mp.Name == name {
-			return i
-		}
-	}
-	return -1
-}
-
-func (m Model) openForm(editIdx int, existing config.Mapping) (tea.Model, tea.Cmd) {
-	m.editIdx = editIdx
-	m.formName = existing.Name
-	m.formOrchestrator = existing.Orchestrator
-	m.formWorker = existing.Worker
-
-	// Build model ID options for the selects
-	modelOpts := make([]huh.Option[string], 0, len(m.state.Models))
-	for _, mdl := range m.state.Models {
-		modelOpts = append(modelOpts, huh.NewOption(mdl.ID, mdl.ID))
+	// Pre-select current role
+	m.formRoleValue = ""
+	if r, ok := m.routing.TargetRoles[item.target.Name]; ok {
+		m.formRoleValue = string(r)
 	}
 
+	m.formTargetName = item.target.Name
+	m.formRole = "" // not used for role picker
 	m.form = huh.NewForm(
 		huh.NewGroup(
-			huh.NewInput().
-				Title("Mapping name").
-				Description("A short label for this mapping (e.g. 'fast', 'quality')").
-				Value(&m.formName),
 			huh.NewSelect[string]().
-				Title("Orchestrator model").
-				Description("Applied to primary/all agents and commands").
-				Options(modelOpts...).
-				Value(&m.formOrchestrator),
-			huh.NewSelect[string]().
-				Title("Worker model").
-				Description("Applied to subagents").
-				Options(modelOpts...).
-				Value(&m.formWorker),
+				Title(fmt.Sprintf("Role for %s", item.target.Name)).
+				Description("Assign a role to this agent/command").
+				Options(opts...).
+				Value(&m.formRoleValue),
 		),
 	)
 
@@ -428,24 +414,90 @@ func (m Model) openForm(editIdx int, existing config.Mapping) (tea.Model, tea.Cm
 	return m, m.form.Init()
 }
 
-func (m *Model) rebuildMappingList() {
-	items := buildMappingItems(m.routing)
-	m.mappingList.SetItems(items)
+// openModelPicker opens a huh form to assign a model to the selected role.
+func (m Model) openModelPicker() (tea.Model, tea.Cmd) {
+	item, ok := m.roleList.SelectedItem().(roleItem)
+	if !ok {
+		return m, nil
+	}
+
+	opts := []huh.Option[string]{
+		huh.NewOption("(none — clear model)", ""),
+	}
+	for _, mdl := range m.state.Models {
+		opts = append(opts, huh.NewOption(mdl.ID, mdl.ID))
+	}
+
+	// Pre-select current model
+	m.formModelValue = ""
+	if mdl, ok := m.routing.RoleModels[item.role]; ok {
+		m.formModelValue = mdl
+	}
+
+	m.formTargetName = "" // not used for model picker
+	m.formRole = item.role
+	m.form = huh.NewForm(
+		huh.NewGroup(
+			huh.NewSelect[string]().
+				Title(fmt.Sprintf("Model for %s", item.role)).
+				Description(config.UserRoleDescription(item.role)).
+				Options(opts...).
+				Value(&m.formModelValue),
+		),
+	)
+
+	m.view = viewForm
+	return m, m.form.Init()
 }
 
-// refreshTargetModels updates the in-memory Target.Model values to reflect
-// the models that were just applied by ApplyActiveMapping. This prevents
-// subsequent activation attempts from incorrectly showing "will overwrite"
-// warnings for models that were set by the current activation.
-func (m *Model) refreshTargetModels(applied config.Mapping) {
-	for i := range m.state.Targets {
-		role := config.RoleForTarget(m.state.Targets[i])
-		if role == config.RoleOrchestrator {
-			m.state.Targets[i].Model = applied.Orchestrator
-		} else {
-			m.state.Targets[i].Model = applied.Worker
+func (m Model) handleFormComplete() tea.Cmd {
+	if m.formTargetName != "" {
+		// Role picker completed
+		targetName := m.formTargetName
+		roleVal := m.formRoleValue
+		return func() tea.Msg {
+			if roleVal == "" {
+				return rolePickDoneMsg{targetName: targetName, cleared: true}
+			}
+			return rolePickDoneMsg{targetName: targetName, role: config.UserRole(roleVal)}
 		}
 	}
+	// Model picker completed
+	role := m.formRole
+	modelVal := m.formModelValue
+	return func() tea.Msg {
+		if modelVal == "" {
+			return modelPickDoneMsg{role: role, cleared: true}
+		}
+		return modelPickDoneMsg{role: role, model: modelVal}
+	}
+}
+
+func (m Model) applyRouting() (tea.Model, tea.Cmd) {
+	routing := m.routing
+	targets := m.state.Targets
+	return m, func() tea.Msg {
+		err := config.ApplyRouting(routing, targets)
+		return applyResultMsg{err: err}
+	}
+}
+
+func (m Model) saveRoutingCmd() tea.Cmd {
+	routing := m.routing
+	return func() tea.Msg {
+		err := config.SaveRouting(routing)
+		return saveRoutingMsg{err: err}
+	}
+}
+
+func (m *Model) rebuildAgentList() {
+	items := buildTargetItems(m.state.Targets, m.routing)
+	m.agentList.SetItems(items)
+}
+
+func (m *Model) rebuildRoleList() {
+	items := buildRoleItems(m.routing)
+	m.roleList.SetItems(items)
 }
 
 // -- View --------------------------------------------------------------------
@@ -454,15 +506,28 @@ func (m Model) View() string {
 	var content string
 
 	switch m.view {
-	case viewMappings:
-		content = m.mappingList.View()
-		if len(m.warnings) > 0 {
-			content += "\n" + warningStyle.Render("⚠ "+strings.Join(m.warnings, "; "))
-		}
+	case viewAgents:
+		content = m.agentList.View()
 		if m.status != "" {
 			content += "\n" + statusStyle.Render(m.status)
 		}
-		content += "\n" + lipgloss.NewStyle().Faint(true).Render("enter: edit  a: activate  d: delete  q: quit")
+		content += "\n" + faintStyle.Render("r: assign role  a: apply routing  tab: roles view  q: quit")
+
+	case viewRoles:
+		content = m.roleList.View()
+		if m.status != "" {
+			content += "\n" + statusStyle.Render(m.status)
+		}
+		var summary []string
+		for _, r := range config.AllUserRoles() {
+			model := faintStyle.Render("—")
+			if m, ok := m.routing.RoleModels[r]; ok && m != "" {
+				model = roleStyle.Render(m)
+			}
+			summary = append(summary, fmt.Sprintf("  %s → %s", roleStyle.Render(string(r)), model))
+		}
+		content += "\n" + strings.Join(summary, "\n")
+		content += "\n" + faintStyle.Render("enter: set model  tab: agents view  esc: back  q: quit")
 
 	case viewForm:
 		if m.form != nil {

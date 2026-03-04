@@ -1,10 +1,10 @@
 # omp — OpenCode Model Preferences
 
-A TUI for managing **model routing** in [OpenCode](https://github.com/anomalyco/opencode). Instead of assigning a model to each agent individually, `omp` lets you define named **mappings** — each pairing an *orchestrator* model with a *worker* model — and activate one mapping to apply it globally.
+A TUI for managing **model routing** in [OpenCode](https://github.com/anomalyco/opencode). Assign **roles** to agents/commands, then map each role to a model. When you apply routing, only roles with a model mapped actually write to `opencode.json` — unmapped roles leave agents unchanged.
 
-## Role Definitions
+## Roles
 
-`omp` uses five named roles as the vocabulary for model assignment. Each role represents a distinct capability profile:
+`omp` uses five named roles as the vocabulary for model assignment:
 
 | Role | Purpose |
 |------|---------|
@@ -14,18 +14,7 @@ A TUI for managing **model routing** in [OpenCode](https://github.com/anomalyco/
 | `librarian` | Fact-checking and research |
 | `fixer` | Expertise and problem solving |
 
-> **Note:** Roles are currently declarative vocabulary — they are not yet mapped to specific agents or commands. Mapping roles to targets is planned for a follow-on change.
-
-## Why
-
-OpenCode supports per-agent `model` overrides in `opencode.json`, but managing them individually across many agents is tedious. `omp` introduces a two-role routing model:
-
-| Role | Applies to | Example agents |
-|------|-----------|----------------|
-| **Orchestrator** | Primary/all agents + commands | `build`, `plan`, custom primary agents |
-| **Worker** | Subagents | `general`, `explore`, custom subagents |
-
-You define named mappings (e.g. `fast`, `quality`) and activate one. `omp` writes the appropriate model to every agent in `opencode.json` in a single operation.
+Roles are purely for model mapping — they carry no context or system prompt.
 
 ## Install
 
@@ -73,46 +62,61 @@ export OPEN_CHAD_OMP_POPUP_SIZE="120x40"    # absolute cells
 
 ### Flow
 
-1. **Mapping list** — Browse your saved mappings. Each shows its orchestrator and worker model.
-2. **Create/edit** — Press `enter` on a mapping to edit it, or select `(+ new mapping)` to create one. A form lets you set the name, orchestrator model, and worker model.
-3. **Activate** — Press `a` on a mapping to apply it. `omp` writes the orchestrator model to all primary/all agents and commands, and the worker model to all subagents in `opencode.json`.
-4. **Delete** — Press `d` to remove a mapping from the routing config.
+1. **Agents view** (default) — Browse agents and commands. Each shows its current model and assigned role.
+2. **Assign role** — Press `r` on an agent to assign one of the five roles (or clear it).
+3. **Roles view** — Press `tab` to switch to the roles view. Each role shows its mapped model.
+4. **Map model** — Press `enter` on a role to pick a model for it (or clear it).
+5. **Apply** — Press `a` in the agents view to write models to `opencode.json`. Only targets with a role assigned AND whose role has a model mapped are affected.
 
 ### Keybinds
 
+**Agents view:**
+
 | Key | Action |
 |-----|--------|
-| `enter` | Edit selected mapping / confirm form |
-| `a` | Activate selected mapping |
-| `d` | Delete selected mapping |
-| `/` | Filter the mapping list |
-| `esc` / `q` | Back / quit |
-| `ctrl+c` | Quit |
+| `r` | Assign role to selected agent/command |
+| `a` | Apply routing to opencode.json |
+| `tab` | Switch to roles view |
+| `/` | Filter the list |
+| `q` / `ctrl+c` | Quit |
 
-### Activation and existing per-target preferences
+**Roles view:**
 
-When you activate a mapping, `omp` overwrites any existing `agent.*.model` and `command.*.model` values in `opencode.json`. If any agents already have a model set, `omp` will warn you and require a second `a` press to confirm before applying.
+| Key | Action |
+|-----|--------|
+| `enter` | Set model for selected role |
+| `tab` | Switch to agents view |
+| `esc` | Back to agents view |
+| `q` / `ctrl+c` | Quit |
 
-> **Note:** Activation only writes to agents and commands that already have an entry in `opencode.json`. It does not create new agent entries.
+### How routing works
+
+When you press `a` to apply:
+- For each target (agent/command), `omp` checks if it has a role assigned
+- If yes, it looks up the model mapped to that role
+- If the role has a model, it writes that model to `opencode.json`
+- If the role has no model (unmapped), the target keeps its existing model
+- Targets with no role assigned are not touched at all
+
+> **Note:** Apply only writes to agents and commands that already have an entry in `opencode.json`. It does not create new agent entries.
 
 ## Routing config format
 
-Mappings are stored in `~/.config/opencode/omp-routing.json` (separate from `opencode.json`, which does not accept unknown keys):
+Routing is stored in `~/.config/opencode/omp-routing.json` (separate from `opencode.json`, which does not accept unknown keys):
 
 ```json
 {
-  "mappings": [
-    {
-      "name": "fast",
-      "orchestrator": "openai/gpt-4o-mini",
-      "worker": "openai/gpt-4o-mini"
-    },
-    {
-      "name": "quality",
-      "orchestrator": "anthropic/claude-opus-4",
-      "worker": "anthropic/claude-haiku-4"
-    }
-  ]
+  "role_models": {
+    "brain": "anthropic/claude-opus-4",
+    "builder": "anthropic/claude-sonnet-4",
+    "tasker": "openai/gpt-4o"
+  },
+  "target_roles": {
+    "build": "brain",
+    "plan": "brain",
+    "general": "builder",
+    "explore": "tasker"
+  }
 }
 ```
 
@@ -133,18 +137,9 @@ If the refresh fails, `omp` exits immediately with an actionable error:
 ### Agent discovery
 
 - **Built-in agents**: `build`, `plan` (primary, locked); `general`, `explore` (subagent)
-- **Markdown agents**: `~/.config/opencode/agents/*.md` and project `.opencode/agents/*.md` — `mode` from frontmatter determines role
+- **Markdown agents**: `~/.config/opencode/agents/*.md` and project `.opencode/agents/*.md` — `mode` from frontmatter determines classification
 - **JSON agents**: From `agent.*` keys in `opencode.json` (excludes system agents: `compaction`, `title`, `summary`)
 - **Commands**: From `command.*` keys in `opencode.json` and markdown command files
-
-### Role classification
-
-| Agent mode | Role |
-|-----------|------|
-| `primary` | Orchestrator |
-| `all` (default) | Orchestrator |
-| `subagent` | Worker |
-| Commands (any) | Orchestrator |
 
 ### Model discovery
 

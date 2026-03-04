@@ -40,31 +40,17 @@ func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 }
 
 // -- User-facing role taxonomy -----------------------------------------------
-//
-// These five roles define the vocabulary for model assignment. They are
-// declarative only — not yet wired to any routing or target-mapping logic.
-// Future work will let users assign a model to each role and map roles to
-// agents/commands.
-//
-// NOTE: This taxonomy is intentionally forward-declared. The constants and
-// helpers are exported so callers can reference them in UI and documentation
-// without depending on internal routing logic. Do not remove until the
-// role-to-agent mapping feature is implemented.
 
 // UserRole is a named slot in the user-facing role taxonomy.
+// Roles are purely for model mapping — they carry no context or system prompt.
 type UserRole string
 
 const (
-	// RoleBrain is the model for orchestration, planning, and reviewing.
-	RoleBrain UserRole = "brain"
-	// RoleTasker is the model for purely agentic operations and tool calling.
-	RoleTasker UserRole = "tasker"
-	// RoleBuilder is the model for coding.
-	RoleBuilder UserRole = "builder"
-	// RoleLibrarian is the model for fact-checking and research.
+	RoleBrain     UserRole = "brain"
+	RoleTasker    UserRole = "tasker"
+	RoleBuilder   UserRole = "builder"
 	RoleLibrarian UserRole = "librarian"
-	// RoleFixer is the model for expertise and problem solving.
-	RoleFixer UserRole = "fixer"
+	RoleFixer     UserRole = "fixer"
 )
 
 // userRoleDescriptions maps each UserRole to its human-readable description.
@@ -86,20 +72,24 @@ func UserRoleDescription(r UserRole) string {
 	return userRoleDescriptions[r]
 }
 
-// -- Mapping -----------------------------------------------------------------
-
-// Mapping defines a named pair of orchestrator and worker models.
-// Orchestrator model is applied to primary/all agents and commands.
-// Worker model is applied to subagents.
-type Mapping struct {
-	Name         string `json:"name"`
-	Orchestrator string `json:"orchestrator"`
-	Worker       string `json:"worker"`
+// IsValidUserRole returns true if r is one of the five defined roles.
+func IsValidUserRole(r UserRole) bool {
+	_, ok := userRoleDescriptions[r]
+	return ok
 }
 
-// RoutingConfig holds all named mappings.
+// -- Routing config ----------------------------------------------------------
+
+// RoutingConfig holds role-to-model mappings and target-to-role assignments.
+//
+// RoleModels maps each role to a model ID. If a role has no entry (or empty
+// string), targets assigned to that role keep their existing model unchanged.
+//
+// TargetRoles maps each target name (agent or command) to a role. Targets
+// without an entry have no role assignment and are not affected by ApplyRouting.
 type RoutingConfig struct {
-	Mappings []Mapping `json:"mappings"`
+	RoleModels  map[UserRole]string `json:"role_models"`
+	TargetRoles map[string]UserRole `json:"target_roles"`
 }
 
 // RoutingPath returns the path to omp-routing.json, respecting OPENCODE_CONFIG_DIR.
@@ -112,7 +102,10 @@ func RoutingPath() string {
 func LoadRouting() (RoutingConfig, error) {
 	data, err := os.ReadFile(RoutingPath())
 	if os.IsNotExist(err) {
-		return RoutingConfig{}, nil
+		return RoutingConfig{
+			RoleModels:  make(map[UserRole]string),
+			TargetRoles: make(map[string]UserRole),
+		}, nil
 	}
 	if err != nil {
 		return RoutingConfig{}, err
@@ -121,29 +114,16 @@ func LoadRouting() (RoutingConfig, error) {
 	if err := json.Unmarshal(data, &rc); err != nil {
 		return RoutingConfig{}, err
 	}
+	if rc.RoleModels == nil {
+		rc.RoleModels = make(map[UserRole]string)
+	}
+	if rc.TargetRoles == nil {
+		rc.TargetRoles = make(map[string]UserRole)
+	}
 	return rc, nil
 }
 
-// ValidateMapping checks whether the orchestrator and worker model IDs in a
-// mapping exist in the known model list. Returns advisory warning strings
-// (not errors) — models may be available at runtime even if not in the list.
-func ValidateMapping(m Mapping, known []Model) []string {
-	knownSet := make(map[string]bool, len(known))
-	for _, mdl := range known {
-		knownSet[mdl.ID] = true
-	}
-	var warnings []string
-	if m.Orchestrator != "" && !knownSet[m.Orchestrator] {
-		warnings = append(warnings, "orchestrator model not found in registry: "+m.Orchestrator)
-	}
-	if m.Worker != "" && !knownSet[m.Worker] {
-		warnings = append(warnings, "worker model not found in registry: "+m.Worker)
-	}
-	return warnings
-}
-
-// SaveRouting writes the routing config to disk atomically (temp file + rename),
-// so a crash mid-write cannot corrupt the routing config.
+// SaveRouting writes the routing config to disk atomically (temp file + rename).
 func SaveRouting(rc RoutingConfig) error {
 	data, err := json.MarshalIndent(rc, "", "  ")
 	if err != nil {
@@ -152,10 +132,10 @@ func SaveRouting(rc RoutingConfig) error {
 	return writeFileAtomic(RoutingPath(), data, 0644)
 }
 
-// ApplyActiveMapping writes the orchestrator model to all primary/all agents
-// and commands, and the worker model to all subagents, using sjson chaining
-// so the entire write is a single atomic file operation.
-func ApplyActiveMapping(m Mapping, targets []Target) error {
+// ApplyRouting writes model preferences to opencode.json for all targets that
+// have a role assigned AND whose role has a model mapped. Targets without a
+// role assignment or whose role has no model are left unchanged.
+func ApplyRouting(rc RoutingConfig, targets []Target) error {
 	configPath := ConfigPath()
 	raw, err := os.ReadFile(configPath)
 	if err != nil {
@@ -164,12 +144,13 @@ func ApplyActiveMapping(m Mapping, targets []Target) error {
 
 	updated := raw
 	for _, t := range targets {
-		role := RoleForTarget(t)
-		var model string
-		if role == RoleOrchestrator {
-			model = m.Orchestrator
-		} else {
-			model = m.Worker
+		role, hasRole := rc.TargetRoles[t.Name]
+		if !hasRole {
+			continue
+		}
+		model, hasModel := rc.RoleModels[role]
+		if !hasModel || model == "" {
+			continue
 		}
 
 		var jsonPath string
@@ -179,7 +160,7 @@ func ApplyActiveMapping(m Mapping, targets []Target) error {
 			jsonPath = "agent." + t.Name + ".model"
 		}
 
-		// Only write if the key already exists in config (don't create new agent entries)
+		// Only write if the target already exists in config
 		var keyExists bool
 		if t.Kind == KindCommand {
 			keyExists = gjson.GetBytes(raw, "command."+t.Name).Exists()
