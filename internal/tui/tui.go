@@ -254,7 +254,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		h, v := appStyle.GetFrameSize()
 		m.agentList.SetSize(msg.Width-h, msg.Height-v)
-		m.roleList.SetSize(msg.Width-h, msg.Height-v)
+		// Role list needs less height: 5 summary lines + help + status + padding
+		roleExtra := 9
+		m.roleList.SetSize(msg.Width-h, msg.Height-v-roleExtra)
 		return m, nil
 
 	case applyResultMsg:
