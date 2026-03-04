@@ -408,9 +408,10 @@ func (m Model) openRolePicker() (tea.Model, tea.Cmd) {
 				Title(fmt.Sprintf("Role for %s", item.target.Name)).
 				Description("Assign a role to this agent/command").
 				Options(opts...).
+				Height(m.formHeight()).
 				Value(&m.formRoleValue),
 		),
-	)
+	).WithHeight(m.formHeight())
 
 	m.view = viewForm
 	return m, m.form.Init()
@@ -444,9 +445,10 @@ func (m Model) openModelPicker() (tea.Model, tea.Cmd) {
 				Title(fmt.Sprintf("Model for %s", item.role)).
 				Description(config.UserRoleDescription(item.role)).
 				Options(opts...).
+				Height(m.formHeight()).
 				Value(&m.formModelValue),
 		),
-	)
+	).WithHeight(m.formHeight())
 
 	m.view = viewForm
 	return m, m.form.Init()
@@ -490,6 +492,20 @@ func (m Model) saveRoutingCmd() tea.Cmd {
 		err := config.SaveRouting(routing)
 		return saveRoutingMsg{err: err}
 	}
+}
+
+// formHeight returns the available height for huh forms, accounting for
+// the app padding. Falls back to a reasonable default if size is unknown.
+func (m Model) formHeight() int {
+	if m.height <= 0 {
+		return 20
+	}
+	_, v := appStyle.GetFrameSize()
+	h := m.height - v - 2 // 2 for breathing room
+	if h < 10 {
+		h = 10
+	}
+	return h
 }
 
 func (m *Model) rebuildAgentList() {
