@@ -26,6 +26,28 @@ const (
 	KindCommand TargetKind = "command"
 )
 
+// Role classifies a target as orchestrator (primary/all agents, commands) or
+// worker (subagents). Used by the routing system to apply model mappings.
+type Role string
+
+const (
+	RoleOrchestrator Role = "orchestrator"
+	RoleWorker       Role = "worker"
+)
+
+// RoleForTarget returns the routing role for a target.
+// Commands always map to orchestrator regardless of any mode field.
+// Agents with mode "subagent" map to worker; all others map to orchestrator.
+func RoleForTarget(t Target) Role {
+	if t.Kind == KindCommand {
+		return RoleOrchestrator
+	}
+	if t.Mode == "subagent" {
+		return RoleWorker
+	}
+	return RoleOrchestrator
+}
+
 // Target represents an agent or command that can have a model preference.
 type Target struct {
 	Name        string
@@ -375,40 +397,6 @@ func parseFrontmatterField(path, field string) string {
 		}
 	}
 	return ""
-}
-
-// SetModel writes a model preference to the global config.
-// Pass empty string to clear the preference.
-func SetModel(kind TargetKind, name, model string) error {
-	configPath := ConfigPath()
-
-	raw, err := os.ReadFile(configPath)
-	if err != nil {
-		return fmt.Errorf("reading config: %w", err)
-	}
-
-	jsonPath := string(kind) + "." + name + ".model"
-
-	var updated []byte
-	if model == "" {
-		// Remove the model key
-		updated, err = sjson.DeleteBytes(raw, jsonPath)
-		if err != nil {
-			return fmt.Errorf("deleting key: %w", err)
-		}
-	} else {
-		updated, err = sjson.SetBytes(raw, jsonPath, model)
-		if err != nil {
-			return fmt.Errorf("setting key: %w", err)
-		}
-	}
-
-	// Verify it's still valid JSON
-	if !json.Valid(updated) {
-		return fmt.Errorf("resulting config is invalid JSON")
-	}
-
-	return os.WriteFile(configPath, updated, 0644)
 }
 
 // SetAgentOrder rewrites the agent section of opencode.json so that keys appear

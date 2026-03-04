@@ -8,127 +8,119 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-func TestUpdate_WindowSizeBeforeModelSelectionDoesNotPanic(t *testing.T) {
-	m := New(&config.State{
-		Targets: []config.Target{
-			{Name: "build", Kind: config.KindAgent, Mode: "primary"},
-		},
-	})
+func TestUpdate_WindowSizeDoesNotPanic(t *testing.T) {
+	m := New(&config.State{}, config.RoutingConfig{})
 
 	defer func() {
 		if r := recover(); r != nil {
-			t.Fatalf("Update panicked on initial window size message: %v", r)
+			t.Fatalf("Update panicked on window size message: %v", r)
 		}
 	}()
 
 	_, _ = m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
 }
 
-func TestUpdate_WindowSizeWithEmptyTargetsDoesNotPanic(t *testing.T) {
-	m := New(&config.State{})
+func TestUpdate_WindowSizeWithEmptyStateDoesNotPanic(t *testing.T) {
+	m := New(&config.State{}, config.RoutingConfig{})
 
 	defer func() {
 		if r := recover(); r != nil {
-			t.Fatalf("Update panicked with empty targets on window size: %v", r)
+			t.Fatalf("Update panicked with empty state: %v", r)
 		}
 	}()
 
 	_, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
 }
 
-func TestView_80x80_TargetListRendersKeyContent(t *testing.T) {
-	m := New(&config.State{
-		Targets: []config.Target{
-			{Name: "build", Kind: config.KindAgent, Mode: "primary"},
+func TestView_80x80_MappingListRendersTitle(t *testing.T) {
+	m := New(&config.State{}, config.RoutingConfig{
+		Mappings: []config.Mapping{
+			{Name: "quality", Orchestrator: "anthropic/claude-opus-4", Worker: "anthropic/claude-haiku-4"},
 		},
 	})
 
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 80})
 	rendered := updated.(Model).View()
 
-	if !strings.Contains(rendered, "Model Preferences") {
-		t.Fatalf("expected target list title in 80x80 render")
-	}
-	if !strings.Contains(rendered, "build") {
-		t.Fatalf("expected target entry in 80x80 render")
+	if !strings.Contains(rendered, "Model Routing") {
+		t.Fatalf("expected 'Model Routing' title in render, got:\n%s", rendered)
 	}
 }
 
-func TestBuildTargetItems_HiddenAgentsSeparateSection(t *testing.T) {
-	targets := []config.Target{
-		{Name: "build", Kind: config.KindAgent, Mode: "primary"},
-		{Name: "general", Kind: config.KindAgent, Mode: "subagent"},
-		{Name: "adv-researcher", Kind: config.KindAgent, Mode: "subagent", Hidden: true},
+func TestView_80x80_MappingListShowsMappingName(t *testing.T) {
+	m := New(&config.State{}, config.RoutingConfig{
+		Mappings: []config.Mapping{
+			{Name: "quality", Orchestrator: "anthropic/claude-opus-4", Worker: "anthropic/claude-haiku-4"},
+		},
+	})
+
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 80})
+	rendered := updated.(Model).View()
+
+	if !strings.Contains(rendered, "quality") {
+		t.Fatalf("expected mapping name 'quality' in render, got:\n%s", rendered)
 	}
+}
 
-	items := buildTargetItems(targets)
+func TestBuildMappingItems_EmptyRoutingHasNewMappingEntry(t *testing.T) {
+	items := buildMappingItems(config.RoutingConfig{})
 
-	// Collect section headers and agent names in order
-	var sections []string
-	var names []string
+	var hasNew bool
 	for _, item := range items {
-		switch v := item.(type) {
-		case sectionItem:
-			sections = append(sections, v.label)
-		case targetItem:
-			names = append(names, v.target.Name)
+		if _, ok := item.(newMappingItem); ok {
+			hasNew = true
 		}
 	}
-
-	// Expect three sections: Agents, Sub-Agents, Hidden Agents
-	if len(sections) != 3 {
-		t.Fatalf("expected 3 section headers, got %d: %v", len(sections), sections)
-	}
-	if sections[0] != "Agents" {
-		t.Errorf("sections[0] = %q, want Agents", sections[0])
-	}
-	if sections[1] != "Sub-Agents" {
-		t.Errorf("sections[1] = %q, want Sub-Agents", sections[1])
-	}
-	if sections[2] != "Hidden Agents" {
-		t.Errorf("sections[2] = %q, want Hidden Agents", sections[2])
-	}
-
-	// adv-researcher should appear after general
-	generalIdx := -1
-	advIdx := -1
-	for i, n := range names {
-		if n == "general" {
-			generalIdx = i
-		}
-		if n == "adv-researcher" {
-			advIdx = i
-		}
-	}
-	if generalIdx < 0 || advIdx < 0 {
-		t.Fatalf("expected both general and adv-researcher in names, got %v", names)
-	}
-	if advIdx <= generalIdx {
-		t.Errorf("adv-researcher (%d) should appear after general (%d)", advIdx, generalIdx)
+	if !hasNew {
+		t.Error("expected newMappingItem in empty routing list")
 	}
 }
 
-func TestView_80x80_ModelPickerRendersModelEntry(t *testing.T) {
-	m := New(&config.State{
-		Targets: []config.Target{
-			{Name: "build", Kind: config.KindAgent, Mode: "primary"},
+func TestBuildMappingItems_MappingsAppearBeforeNewEntry(t *testing.T) {
+	rc := config.RoutingConfig{
+		Mappings: []config.Mapping{
+			{Name: "fast", Orchestrator: "openai/gpt-4o-mini", Worker: "openai/gpt-4o-mini"},
 		},
-		Models: []config.Model{
-			{ID: "openai/gpt-5.3-codex", Name: "GPT 5.3 Codex"},
-		},
-	})
-
-	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 80})
-	m2 := updated.(Model)
-	m2.targetList.Select(1)
-
-	updated, _ = m2.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	rendered := updated.(Model).View()
-
-	if !strings.Contains(rendered, "Select model for: build") {
-		t.Fatalf("expected model picker title in 80x80 render")
 	}
-	if !strings.Contains(rendered, "openai/gpt-5.3-codex") {
-		t.Fatalf("expected model entry in 80x80 render")
+	items := buildMappingItems(rc)
+
+	var mappingIdx, newIdx int
+	for i, item := range items {
+		switch item.(type) {
+		case mappingItem:
+			mappingIdx = i
+		case newMappingItem:
+			newIdx = i
+		}
+	}
+	if mappingIdx >= newIdx {
+		t.Errorf("mapping item (%d) should appear before new mapping item (%d)", mappingIdx, newIdx)
+	}
+}
+
+// TestRefreshTargetModels verifies that after activation, in-memory target
+// model values are updated to reflect the applied mapping. This prevents
+// subsequent activation attempts from showing false "will overwrite" warnings.
+func TestRefreshTargetModels_UpdatesInMemoryState(t *testing.T) {
+	state := &config.State{
+		Targets: []config.Target{
+			{Name: "build", Kind: config.KindAgent, Mode: "primary", Model: "old/orchestrator"},
+			{Name: "general", Kind: config.KindAgent, Mode: "subagent", Model: "old/worker"},
+		},
+	}
+	m := New(state, config.RoutingConfig{})
+
+	applied := config.Mapping{
+		Name:         "quality",
+		Orchestrator: "anthropic/claude-opus-4",
+		Worker:       "anthropic/claude-haiku-4",
+	}
+	m.refreshTargetModels(applied)
+
+	if m.state.Targets[0].Model != "anthropic/claude-opus-4" {
+		t.Errorf("orchestrator target model = %q, want anthropic/claude-opus-4", m.state.Targets[0].Model)
+	}
+	if m.state.Targets[1].Model != "anthropic/claude-haiku-4" {
+		t.Errorf("worker target model = %q, want anthropic/claude-haiku-4", m.state.Targets[1].Model)
 	}
 }

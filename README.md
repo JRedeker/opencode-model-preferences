@@ -1,17 +1,37 @@
 # omp — OpenCode Model Preferences
 
-A standalone TUI for managing per-agent and per-command model preferences in [OpenCode](https://github.com/anomalyco/opencode).
+A TUI for managing **model routing** in [OpenCode](https://github.com/anomalyco/opencode). Instead of assigning a model to each agent individually, `omp` lets you define named **mappings** — each pairing an *orchestrator* model with a *worker* model — and activate one mapping to apply it globally.
+
+## Role Definitions
+
+`omp` uses five named roles as the vocabulary for model assignment. Each role represents a distinct capability profile:
+
+| Role | Purpose |
+|------|---------|
+| `brain` | Orchestration, planning, and reviewing |
+| `tasker` | Purely agentic operations and tool calling |
+| `builder` | Coding |
+| `librarian` | Fact-checking and research |
+| `fixer` | Expertise and problem solving |
+
+> **Note:** Roles are currently declarative vocabulary — they are not yet mapped to specific agents or commands. Mapping roles to targets is planned for a follow-on change.
 
 ## Why
 
-OpenCode supports setting `model` overrides for individual agents and slash commands in `opencode.json`, but there's no built-in UI for it. `omp` gives you a filterable picker that discovers all your agents, commands, and registered models, then writes the preference directly to your config.
+OpenCode supports per-agent `model` overrides in `opencode.json`, but managing them individually across many agents is tedious. `omp` introduces a two-role routing model:
+
+| Role | Applies to | Example agents |
+|------|-----------|----------------|
+| **Orchestrator** | Primary/all agents + commands | `build`, `plan`, custom primary agents |
+| **Worker** | Subagents | `general`, `explore`, custom subagents |
+
+You define named mappings (e.g. `fast`, `quality`) and activate one. `omp` writes the appropriate model to every agent in `opencode.json` in a single operation.
 
 ## Install
 
 Requires Go 1.23+.
 
 ```bash
-# Clone and install to ~/.local/bin
 git clone https://github.com/JRedeker/opencode-model-preferences.git
 cd opencode-model-preferences
 make install
@@ -25,8 +45,6 @@ make build
 ```
 
 ## Update
-
-Pull the latest changes and reinstall:
 
 ```bash
 cd opencode-model-preferences
@@ -53,40 +71,56 @@ export OPEN_CHAD_OMP_POPUP_SIZE="90%x85%"   # percent
 export OPEN_CHAD_OMP_POPUP_SIZE="120x40"    # absolute cells
 ```
 
-- `q`, `esc`, and `ctrl+c` are treated as graceful closes (exit code 0).
-- Successful exits close the popup automatically.
-- Non-zero exits stay visible in the popup for debugging.
-- Preference changes apply on the next OpenCode agent/command invocation — no restart needed.
-
 ### Flow
 
-1. **Target list** — Browse agents and commands grouped by type (primary agents, subagents, commands). Each entry shows its current model preference or `(default)`.
-2. **Model picker** — Select a model from all providers in your config, or choose `(clear preference)` to remove the override.
-3. **Write** — The preference is written to `~/.config/opencode/opencode.json` and the list refreshes.
+1. **Mapping list** — Browse your saved mappings. Each shows its orchestrator and worker model.
+2. **Create/edit** — Press `enter` on a mapping to edit it, or select `(+ new mapping)` to create one. A form lets you set the name, orchestrator model, and worker model.
+3. **Activate** — Press `a` on a mapping to apply it. `omp` writes the orchestrator model to all primary/all agents and commands, and the worker model to all subagents in `opencode.json`.
+4. **Delete** — Press `d` to remove a mapping from the routing config.
 
 ### Keybinds
 
 | Key | Action |
 |-----|--------|
-| `enter` | Select target / confirm model |
-| `/` | Filter the current list |
-| `ctrl+up` | Move agent up (custom primary agents only) |
-| `ctrl+down` | Move agent down (custom primary agents only) |
-| `esc` | Back to targets / quit from targets |
-| `q` | Back to targets / quit from targets |
-| `ctrl+c` | Same as `q` |
+| `enter` | Edit selected mapping / confirm form |
+| `a` | Activate selected mapping |
+| `d` | Delete selected mapping |
+| `/` | Filter the mapping list |
+| `esc` / `q` | Back / quit |
+| `ctrl+c` | Quit |
 
-### Agent ordering
+### Activation and existing per-target preferences
 
-Custom primary agents can be reordered with `ctrl+up` / `ctrl+down`. The new order is written directly to `~/.config/opencode/opencode.json` and controls the **Tab-cycle order** in OpenCode (OpenCode uses JSON key insertion order for its agent cycle).
+When you activate a mapping, `omp` overwrites any existing `agent.*.model` and `command.*.model` values in `opencode.json`. If any agents already have a model set, `omp` will warn you and require a second `a` press to confirm before applying.
 
-Built-in primary agents (`build` and `plan`) are shown as `[locked]` — their cycle positions are fixed by OpenCode and cannot be changed here. Custom primary agents always appear after them in the cycle.
+> **Note:** Activation only writes to agents and commands that already have an entry in `opencode.json`. It does not create new agent entries.
+
+## Routing config format
+
+Mappings are stored in `~/.config/opencode/omp-routing.json` (separate from `opencode.json`, which does not accept unknown keys):
+
+```json
+{
+  "mappings": [
+    {
+      "name": "fast",
+      "orchestrator": "openai/gpt-4o-mini",
+      "worker": "openai/gpt-4o-mini"
+    },
+    {
+      "name": "quality",
+      "orchestrator": "anthropic/claude-opus-4",
+      "worker": "anthropic/claude-haiku-4"
+    }
+  ]
+}
+```
 
 ## How it works
 
 ### Startup model refresh
 
-On every launch, `omp` runs `opencode models --refresh` before loading the config. This ensures the model picker always reflects the latest models from your configured providers (including any newly added or removed models).
+On every launch, `omp` runs `opencode models --refresh` before loading the config. This ensures the model picker always reflects the latest models from your configured providers.
 
 If the refresh fails, `omp` exits immediately with an actionable error:
 
@@ -96,22 +130,27 @@ If the refresh fails, `omp` exits immediately with an actionable error:
 | Non-zero exit (auth/network) | `opencode models --refresh failed: …` + command output |
 | Timeout (>30s) | `opencode models --refresh timed out after 30s` |
 
-### Discovery
+### Agent discovery
 
 - **Built-in agents**: `build`, `plan` (primary, locked); `general`, `explore` (subagent)
-- **Markdown agents**: `~/.config/opencode/agents/*.md` and project `.opencode/agents/*.md` — discovered first; `mode` from frontmatter takes precedence. Project discovery uses `OPENCODE_PROJECT_DIR` when set, otherwise it walks up from the current working directory to find the nearest `.opencode/`.
-- **JSON agents**: From `agent.*` keys in `opencode.json` (excludes system agents: `compaction`, `title`, `summary`); only adds agents not already defined by a markdown file. JSON `model` overrides are always applied regardless of which source defined the agent.
-- **JSON commands**: From `command.*` keys in `opencode.json`
-- **Markdown commands**: `~/.config/opencode/commands/*.md` and project `.opencode/commands/*.md` (same project discovery rules as agents)
-- **Models**: CLI-first discovery via `opencode models` output, with fallback to `provider.*.models` entries in `opencode.json` when the CLI is unavailable or returns no parseable models. This ensures the picker always shows OpenCode's runtime model registry.
+- **Markdown agents**: `~/.config/opencode/agents/*.md` and project `.opencode/agents/*.md` — `mode` from frontmatter determines role
+- **JSON agents**: From `agent.*` keys in `opencode.json` (excludes system agents: `compaction`, `title`, `summary`)
+- **Commands**: From `command.*` keys in `opencode.json` and markdown command files
 
-> **Precedence note**: if an agent is defined in both a markdown file and `opencode.json`, the markdown `mode` wins. This means an agent with `mode: subagent` in its `.md` file correctly appears under Sub-Agents even if the JSON entry has no `mode` field.
+### Role classification
 
-### Config writes
+| Agent mode | Role |
+|-----------|------|
+| `primary` | Orchestrator |
+| `all` (default) | Orchestrator |
+| `subagent` | Worker |
+| Commands (any) | Orchestrator |
 
-Uses [tidwall/sjson](https://github.com/tidwall/sjson) for surgical JSON path updates that preserve existing formatting and comments. Sets `agent.<name>.model` or `command.<name>.model`. Clearing a preference deletes the key.
+### Model discovery
 
-### Environment
+CLI-first discovery via `opencode models` output, with fallback to `provider.*.models` entries in `opencode.json`.
+
+## Environment
 
 | Variable | Purpose |
 |----------|---------|

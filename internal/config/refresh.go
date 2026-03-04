@@ -41,15 +41,13 @@ func RefreshModels() error {
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded || err == context.DeadlineExceeded {
 			return fmt.Errorf(
-				"opencode models --refresh timed out after %s\n"+
-					"  Check your network connection or API key configuration.",
+				"opencode models --refresh timed out after %s; check your network connection or API key configuration",
 				RefreshTimeout,
 			)
 		}
 		if isNotFound(err) {
 			return fmt.Errorf(
-				"opencode binary not found in PATH\n" +
-					"  Install opencode and ensure it is on your PATH, then retry.",
+				"opencode binary not found in PATH; install opencode and ensure it is on your PATH, then retry",
 			)
 		}
 		return fmt.Errorf(
@@ -83,15 +81,13 @@ func FetchModels() ([]Model, error) {
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded || err == context.DeadlineExceeded {
 			return nil, fmt.Errorf(
-				"opencode models timed out after %s\n"+
-					"  Check your network connection or API key configuration.",
+				"opencode models timed out after %s; check your network connection or API key configuration",
 				FetchTimeout,
 			)
 		}
 		if isNotFound(err) {
 			return nil, fmt.Errorf(
-				"opencode binary not found in PATH\n" +
-					"  Install opencode and ensure it is on your PATH, then retry.",
+				"opencode binary not found in PATH; install opencode and ensure it is on your PATH, then retry",
 			)
 		}
 		return nil, fmt.Errorf("opencode models failed: %w\n  Output: %s", err, string(out))

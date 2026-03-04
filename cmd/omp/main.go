@@ -44,7 +44,12 @@ func run(w io.Writer) error {
 		)
 	}
 
-	m := tui.New(state)
+	routing, err := config.LoadRouting()
+	if err != nil {
+		return fmt.Errorf("loading routing config: %w", err)
+	}
+
+	m := tui.New(state, routing)
 	if _, err := runProgram(m); err != nil {
 		if errors.Is(err, tea.ErrInterrupted) || errors.Is(err, tea.ErrProgramKilled) {
 			return nil

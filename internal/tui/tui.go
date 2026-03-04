@@ -1,6 +1,10 @@
-// Package tui implements the Bubbletea TUI for model preference selection.
+// Package tui implements the Bubbletea TUI for model routing management.
 //
-// Flow: main list (agents/commands) → model picker → write to config → back to list.
+// Flow: mapping list → (new/edit mapping via huh form) → activate mapping → back to list.
+//
+// A "mapping" pairs a name with an orchestrator model (applied to primary/all
+// agents and commands) and a worker model (applied to subagents). Activating a
+// mapping writes those models to opencode.json via ApplyActiveMapping.
 package tui
 
 import (
@@ -12,6 +16,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -34,124 +39,57 @@ var (
 			Foreground(lipgloss.Color("#7D56F4")).
 			Bold(true).
 			PaddingTop(1)
+
+	warningStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#FAB387")).
+			Italic(true)
 )
 
 // -- List items --------------------------------------------------------------
 
-// sectionItem is a non-selectable section header in the target list.
+// sectionItem is a non-selectable section header.
 type sectionItem struct{ label string }
 
 func (s sectionItem) Title() string       { return s.label }
 func (s sectionItem) Description() string { return "" }
 func (s sectionItem) FilterValue() string { return "" }
 
-// targetItem wraps a config.Target for the list.
-type targetItem struct {
-	target config.Target
+// mappingItem wraps a config.Mapping for the list.
+type mappingItem struct {
+	mapping config.Mapping
 }
 
-func (t targetItem) Title() string { return t.target.Name }
-func (t targetItem) Description() string {
-	var parts []string
-	if t.target.Kind == config.KindAgent {
-		parts = append(parts, t.target.Mode)
-		if t.target.Locked {
-			parts = append(parts, "[locked]")
-		}
-	} else {
-		parts = append(parts, "command")
-	}
-	if t.target.Model != "" {
-		parts = append(parts, "model: "+t.target.Model)
-	} else {
-		parts = append(parts, "model: (default)")
-	}
-	if t.target.Description != "" {
-		parts = append(parts, t.target.Description)
-	}
-	return strings.Join(parts, " | ")
+func (m mappingItem) Title() string { return m.mapping.Name }
+func (m mappingItem) Description() string {
+	return fmt.Sprintf("orchestrator: %s | worker: %s", m.mapping.Orchestrator, m.mapping.Worker)
 }
-func (t targetItem) FilterValue() string { return t.target.Name }
-
-// modelItem wraps a config.Model for the picker.
-type modelItem struct {
-	model    config.Model
-	isClear  bool // special "clear" entry
-	selected bool // currently assigned
+func (m mappingItem) FilterValue() string {
+	return m.mapping.Name + " " + m.mapping.Orchestrator + " " + m.mapping.Worker
 }
 
-func (m modelItem) Title() string {
-	if m.isClear {
-		return "(clear preference)"
-	}
-	return m.model.ID
-}
-func (m modelItem) Description() string {
-	if m.isClear {
-		return "Revert to session default"
-	}
-	desc := m.model.Name
-	if m.selected {
-		desc += " (current)"
-	}
-	return desc
-}
-func (m modelItem) FilterValue() string {
-	if m.isClear {
-		return "clear none default"
-	}
-	return m.model.ID + " " + m.model.Name
-}
+// newMappingItem is the special "create new mapping" entry.
+type newMappingItem struct{}
 
-// buildTargetItems constructs the ordered, section-headed list items:
-// Agents → Sub-Agents → Hidden Agents → Other (commands).
-func buildTargetItems(targets []config.Target) []list.Item {
-	var primary, subagent, hidden, commands []config.Target
-	for _, t := range targets {
-		switch {
-		case t.Kind == config.KindAgent && t.Hidden:
-			hidden = append(hidden, t)
-		case t.Kind == config.KindAgent && (t.Mode == "primary" || t.Mode == "all"):
-			primary = append(primary, t)
-		case t.Kind == config.KindAgent && t.Mode == "subagent":
-			subagent = append(subagent, t)
-		default:
-			commands = append(commands, t)
-		}
-	}
+func (n newMappingItem) Title() string       { return "(+ new mapping)" }
+func (n newMappingItem) Description() string { return "Create a new orchestrator/worker model pair" }
+func (n newMappingItem) FilterValue() string { return "new create" }
 
+// buildMappingItems constructs the list items for the mapping list view.
+func buildMappingItems(rc config.RoutingConfig) []list.Item {
 	var items []list.Item
-	if len(primary) > 0 {
-		items = append(items, sectionItem{"Agents"})
-		for _, t := range primary {
-			items = append(items, targetItem{target: t})
+	if len(rc.Mappings) > 0 {
+		items = append(items, sectionItem{"Saved Mappings"})
+		for _, m := range rc.Mappings {
+			items = append(items, mappingItem{mapping: m})
 		}
 	}
-	if len(subagent) > 0 {
-		items = append(items, sectionItem{"Sub-Agents"})
-		for _, t := range subagent {
-			items = append(items, targetItem{target: t})
-		}
-	}
-	if len(hidden) > 0 {
-		items = append(items, sectionItem{"Hidden Agents"})
-		for _, t := range hidden {
-			items = append(items, targetItem{target: t})
-		}
-	}
-	if len(commands) > 0 {
-		items = append(items, sectionItem{"Other"})
-		for _, t := range commands {
-			items = append(items, targetItem{target: t})
-		}
-	}
+	items = append(items, sectionItem{"Actions"})
+	items = append(items, newMappingItem{})
 	return items
 }
 
 // -- Delegate ----------------------------------------------------------------
 
-// itemDelegate wraps the default delegate but renders sectionItems as
-// styled, non-selectable section headers instead of normal list rows.
 type itemDelegate struct {
 	inner list.DefaultDelegate
 }
@@ -184,63 +122,77 @@ func (d itemDelegate) Render(w io.Writer, m list.Model, index int, item list.Ite
 type viewState int
 
 const (
-	viewTargets viewState = iota
-	viewModels
+	viewMappings viewState = iota // mapping list
+	viewForm                      // huh form for create/edit
 )
-
-// -- Model -------------------------------------------------------------------
-
-type Model struct {
-	state      *config.State
-	view       viewState
-	targetList list.Model
-	modelList  list.Model
-	selected   *config.Target // the target we're configuring
-	status     string         // status message after writes
-	width      int
-	height     int
-}
-
-// New creates the initial TUI model.
-func New(state *config.State) Model {
-	items := buildTargetItems(state.Targets)
-
-	delegate := newDelegate()
-	targetList := list.New(items, delegate, 0, 0)
-	targetList.Title = "Model Preferences"
-	targetList.Styles.Title = titleStyle
-	targetList.SetShowStatusBar(true)
-	targetList.SetFilteringEnabled(true)
-
-	modelList := list.New([]list.Item{}, delegate, 0, 0)
-	modelList.SetShowStatusBar(true)
-	modelList.SetFilteringEnabled(true)
-
-	return Model{
-		state:      state,
-		view:       viewTargets,
-		targetList: targetList,
-		modelList:  modelList,
-	}
-}
 
 // -- Messages ----------------------------------------------------------------
 
-type writeResultMsg struct {
-	err    error
-	target string
-	model  string
+type activateResultMsg struct {
+	err     error
+	mapping config.Mapping
 }
 
-type reorderResultMsg struct {
+type saveRoutingResultMsg struct {
 	err error
 }
 
-// -- Update ------------------------------------------------------------------
+type formDoneMsg struct {
+	mapping config.Mapping
+	saved   bool // false = cancelled
+}
+
+// -- Model -------------------------------------------------------------------
+
+// Model is the top-level Bubbletea model.
+type Model struct {
+	state   *config.State
+	routing config.RoutingConfig
+	view    viewState
+
+	mappingList list.Model
+	form        *huh.Form
+
+	// form field values (bound to huh)
+	formName         string
+	formOrchestrator string
+	formWorker       string
+	editIdx          int // -1 = new, >=0 = editing existing
+
+	// pendingActivate holds a mapping awaiting confirmation when existing
+	// per-target model prefs would be overwritten.
+	pendingActivate *config.Mapping
+
+	status   string
+	warnings []string
+	width    int
+	height   int
+}
+
+// New creates the initial TUI model.
+func New(state *config.State, routing config.RoutingConfig) Model {
+	items := buildMappingItems(routing)
+	delegate := newDelegate()
+	ml := list.New(items, delegate, 0, 0)
+	ml.Title = "Model Routing"
+	ml.Styles.Title = titleStyle
+	ml.SetShowStatusBar(true)
+	ml.SetFilteringEnabled(true)
+
+	return Model{
+		state:       state,
+		routing:     routing,
+		view:        viewMappings,
+		mappingList: ml,
+		editIdx:     -1,
+	}
+}
 
 func (m Model) Init() tea.Cmd {
 	return nil
 }
+
+// -- Update ------------------------------------------------------------------
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -248,253 +200,274 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		h, v := appStyle.GetFrameSize()
-		m.targetList.SetSize(msg.Width-h, msg.Height-v)
-		m.modelList.SetSize(msg.Width-h, msg.Height-v)
+		m.mappingList.SetSize(msg.Width-h, msg.Height-v)
 		return m, nil
 
-	case writeResultMsg:
+	case activateResultMsg:
 		if msg.err != nil {
-			m.status = fmt.Sprintf("Error: %v", msg.err)
-		} else if msg.model == "" {
-			m.status = fmt.Sprintf("Cleared model for %s", msg.target)
+			m.status = fmt.Sprintf("Error activating: %v", msg.err)
 		} else {
-			m.status = fmt.Sprintf("Set %s -> %s", msg.target, msg.model)
+			m.status = fmt.Sprintf("Activated mapping '%s'", msg.mapping.Name)
+			// Refresh in-memory target models so subsequent activation checks
+			// reflect the newly applied values (avoids false "will overwrite" warnings).
+			m.refreshTargetModels(msg.mapping)
 		}
-		// Reload state and rebuild target list
-		newState, err := config.Load()
-		if err == nil {
-			m.state = newState
-			m = m.rebuildTargetList()
-		}
-		m.view = viewTargets
+		m.view = viewMappings
 		return m, nil
 
-	case reorderResultMsg:
+	case saveRoutingResultMsg:
 		if msg.err != nil {
-			m.status = fmt.Sprintf("Error reordering: %v", msg.err)
+			m.status = fmt.Sprintf("Error saving: %v", msg.err)
 		} else {
-			m.status = "Agent order saved"
+			m.status = "Mapping saved"
 		}
-		newState, err := config.Load()
-		if err == nil {
-			m.state = newState
-			m = m.rebuildTargetList()
-		}
+		m.view = viewMappings
+		m.rebuildMappingList()
 		return m, nil
+
+	case formDoneMsg:
+		if !msg.saved {
+			m.view = viewMappings
+			m.status = ""
+			return m, nil
+		}
+		// Save the mapping
+		mapping := msg.mapping
+		routing := m.routing
+		if m.editIdx >= 0 && m.editIdx < len(routing.Mappings) {
+			routing.Mappings[m.editIdx] = mapping
+		} else {
+			routing.Mappings = append(routing.Mappings, mapping)
+		}
+		m.routing = routing
+		return m, func() tea.Msg {
+			err := config.SaveRouting(routing)
+			return saveRoutingResultMsg{err: err}
+		}
 
 	case tea.KeyMsg:
-		// Don't handle keys when filtering
-		if m.view == viewTargets && m.targetList.FilterState() == list.Filtering {
+		if m.view == viewForm {
+			// Form handles its own keys
 			break
 		}
-		if m.view == viewModels && m.modelList.FilterState() == list.Filtering {
+		if m.view == viewMappings && m.mappingList.FilterState() == list.Filtering {
 			break
 		}
 
 		switch {
-		case key.Matches(msg, key.NewBinding(key.WithKeys("q", "ctrl+c"))):
-			if m.view == viewModels {
-				m.view = viewTargets
-				m.status = ""
-				return m, nil
-			}
-			return m, tea.Quit
-
-		case key.Matches(msg, key.NewBinding(key.WithKeys("esc"))):
-			if m.view == viewModels {
-				m.view = viewTargets
-				m.status = ""
+		case key.Matches(msg, key.NewBinding(key.WithKeys("q", "ctrl+c", "esc"))):
+			if m.pendingActivate != nil {
+				// Cancel pending activation
+				m.pendingActivate = nil
+				m.status = "Activation cancelled"
 				return m, nil
 			}
 			return m, tea.Quit
 
 		case key.Matches(msg, key.NewBinding(key.WithKeys("enter"))):
+			m.pendingActivate = nil // cancel any pending activation on navigation
 			return m.handleSelect()
 
-		case key.Matches(msg, key.NewBinding(key.WithKeys("ctrl+up"))):
-			if m.view == viewTargets {
-				return m.handleReorder(-1)
+		case key.Matches(msg, key.NewBinding(key.WithKeys("a"))):
+			// 'a' activates the selected mapping (or confirms pending activation)
+			if m.view == viewMappings {
+				if m.pendingActivate != nil {
+					// Second press: confirmed — apply
+					mapping := *m.pendingActivate
+					m.pendingActivate = nil
+					targets := m.state.Targets
+					return m, func() tea.Msg {
+						err := config.ApplyActiveMapping(mapping, targets)
+						return activateResultMsg{err: err, mapping: mapping}
+					}
+				}
+				return m.handleActivate()
 			}
 
-		case key.Matches(msg, key.NewBinding(key.WithKeys("ctrl+down"))):
-			if m.view == viewTargets {
-				return m.handleReorder(1)
+		case key.Matches(msg, key.NewBinding(key.WithKeys("d"))):
+			// 'd' deletes the selected mapping
+			if m.view == viewMappings {
+				return m.handleDelete()
 			}
 		}
 	}
 
-	// Delegate to active list
+	// Delegate to active view
 	var cmd tea.Cmd
-	if m.view == viewTargets {
-		m.targetList, cmd = m.targetList.Update(msg)
-	} else {
-		m.modelList, cmd = m.modelList.Update(msg)
+	if m.view == viewMappings {
+		m.mappingList, cmd = m.mappingList.Update(msg)
+	} else if m.view == viewForm && m.form != nil {
+		form, fCmd := m.form.Update(msg)
+		if f, ok := form.(*huh.Form); ok {
+			m.form = f
+		}
+		if m.form.State == huh.StateCompleted {
+			return m, func() tea.Msg {
+				return formDoneMsg{
+					mapping: config.Mapping{
+						Name:         m.formName,
+						Orchestrator: m.formOrchestrator,
+						Worker:       m.formWorker,
+					},
+					saved: true,
+				}
+			}
+		}
+		if m.form.State == huh.StateAborted {
+			return m, func() tea.Msg {
+				return formDoneMsg{saved: false}
+			}
+		}
+		cmd = fCmd
 	}
 	return m, cmd
 }
 
 func (m Model) handleSelect() (tea.Model, tea.Cmd) {
-	if m.view == viewTargets {
-		item, ok := m.targetList.SelectedItem().(targetItem)
-		if !ok {
-			// sectionItem or nothing selected — do nothing
-			return m, nil
-		}
-		t := item.target
-		m.selected = &t
-		m.modelList = m.buildModelList(t)
-		m.view = viewModels
-		m.status = ""
-		return m, nil
+	switch item := m.mappingList.SelectedItem().(type) {
+	case newMappingItem:
+		return m.openForm(-1, config.Mapping{})
+	case mappingItem:
+		// Enter on a mapping: open edit form
+		idx := m.findMappingIdx(item.mapping.Name)
+		return m.openForm(idx, item.mapping)
 	}
+	return m, nil
+}
 
-	// Model selection
-	item, ok := m.modelList.SelectedItem().(modelItem)
+func (m Model) handleActivate() (tea.Model, tea.Cmd) {
+	item, ok := m.mappingList.SelectedItem().(mappingItem)
 	if !ok {
 		return m, nil
 	}
+	mapping := item.mapping
 
-	target := m.selected
-	var modelID string
-	if !item.isClear {
-		modelID = item.model.ID
+	// Check if any targets already have a model set — warn before overwriting.
+	var existing []string
+	for _, t := range m.state.Targets {
+		if t.Model != "" {
+			existing = append(existing, t.Name)
+		}
+	}
+	if len(existing) > 0 {
+		m.pendingActivate = &mapping
+		m.status = fmt.Sprintf(
+			"⚠ Will overwrite existing model prefs for: %s — press 'a' again to confirm, any other key to cancel",
+			strings.Join(existing, ", "),
+		)
+		return m, nil
 	}
 
-	// Write async
+	targets := m.state.Targets
 	return m, func() tea.Msg {
-		err := config.SetModel(target.Kind, target.Name, modelID)
-		return writeResultMsg{
-			err:    err,
-			target: target.Name,
-			model:  modelID,
-		}
+		err := config.ApplyActiveMapping(mapping, targets)
+		return activateResultMsg{err: err, mapping: mapping}
 	}
 }
 
-func (m Model) buildModelList(t config.Target) list.Model {
-	var items []list.Item
-
-	// Clear option first
-	items = append(items, modelItem{isClear: true})
-
-	// All available models
-	for _, mdl := range m.state.Models {
-		items = append(items, modelItem{
-			model:    mdl,
-			selected: mdl.ID == t.Model,
-		})
-	}
-
-	delegate := newDelegate()
-	ml := list.New(items, delegate, 0, 0)
-	ml.Title = fmt.Sprintf("Select model for: %s", t.Name)
-	ml.Styles.Title = titleStyle
-	ml.SetFilteringEnabled(true)
-	ml.SetShowStatusBar(true)
-
-	h, v := appStyle.GetFrameSize()
-	ml.SetSize(m.width-h, m.height-v)
-
-	return ml
-}
-
-func (m Model) handleReorder(delta int) (tea.Model, tea.Cmd) {
-	item, ok := m.targetList.SelectedItem().(targetItem)
+func (m Model) handleDelete() (tea.Model, tea.Cmd) {
+	item, ok := m.mappingList.SelectedItem().(mappingItem)
 	if !ok {
 		return m, nil
 	}
-	t := item.target
-
-	// Only moveable primary agents can be reordered
-	if t.Kind != config.KindAgent || t.Locked {
-		return m, nil
-	}
-	if t.Mode != "primary" && t.Mode != "all" {
-		return m, nil
-	}
-
-	// Extract ordered list of moveable agents from current state
-	var moveable []config.Target
-	for _, tgt := range m.state.Targets {
-		if tgt.Kind == config.KindAgent && !tgt.Locked && (tgt.Mode == "primary" || tgt.Mode == "all") {
-			moveable = append(moveable, tgt)
-		}
-	}
-
-	// Find current index
-	idx := -1
-	for i, tgt := range moveable {
-		if tgt.Name == t.Name {
-			idx = i
-			break
-		}
-	}
+	idx := m.findMappingIdx(item.mapping.Name)
 	if idx < 0 {
 		return m, nil
 	}
-
-	newIdx := idx + delta
-	if newIdx < 0 || newIdx >= len(moveable) {
-		return m, nil
-	}
-
-	// Swap
-	moveable[idx], moveable[newIdx] = moveable[newIdx], moveable[idx]
-
-	// Build ordered names for SetAgentOrder (all agents in config, with moveable in new order)
-	// Collect all config-keyed agent names preserving non-moveable positions
-	names := make([]string, 0, len(moveable))
-	for _, tgt := range moveable {
-		names = append(names, tgt.Name)
-	}
-
-	// Optimistically update state order so UI moves immediately
-	newTargets := make([]config.Target, 0, len(m.state.Targets))
-	moveableIdx := 0
-	for _, tgt := range m.state.Targets {
-		if tgt.Kind == config.KindAgent && !tgt.Locked && (tgt.Mode == "primary" || tgt.Mode == "all") {
-			newTargets = append(newTargets, moveable[moveableIdx])
-			moveableIdx++
-		} else {
-			newTargets = append(newTargets, tgt)
-		}
-	}
-	m.state.Targets = newTargets
-	m = m.rebuildTargetList()
-
-	// Move cursor to follow the item
-	items := m.targetList.Items()
-	for i, it := range items {
-		if ti, ok := it.(targetItem); ok && ti.target.Name == t.Name {
-			m.targetList.Select(i)
-			break
-		}
-	}
-
+	routing := m.routing
+	routing.Mappings = append(routing.Mappings[:idx], routing.Mappings[idx+1:]...)
+	m.routing = routing
+	m.rebuildMappingList()
 	return m, func() tea.Msg {
-		err := config.SetAgentOrder(names)
-		return reorderResultMsg{err: err}
+		err := config.SaveRouting(routing)
+		return saveRoutingResultMsg{err: err}
 	}
 }
 
-func (m Model) rebuildTargetList() Model {
-	items := buildTargetItems(m.state.Targets)
-	m.targetList.SetItems(items)
-	return m
+func (m Model) findMappingIdx(name string) int {
+	for i, mp := range m.routing.Mappings {
+		if mp.Name == name {
+			return i
+		}
+	}
+	return -1
+}
+
+func (m Model) openForm(editIdx int, existing config.Mapping) (tea.Model, tea.Cmd) {
+	m.editIdx = editIdx
+	m.formName = existing.Name
+	m.formOrchestrator = existing.Orchestrator
+	m.formWorker = existing.Worker
+
+	// Build model ID options for the selects
+	modelOpts := make([]huh.Option[string], 0, len(m.state.Models))
+	for _, mdl := range m.state.Models {
+		modelOpts = append(modelOpts, huh.NewOption(mdl.ID, mdl.ID))
+	}
+
+	m.form = huh.NewForm(
+		huh.NewGroup(
+			huh.NewInput().
+				Title("Mapping name").
+				Description("A short label for this mapping (e.g. 'fast', 'quality')").
+				Value(&m.formName),
+			huh.NewSelect[string]().
+				Title("Orchestrator model").
+				Description("Applied to primary/all agents and commands").
+				Options(modelOpts...).
+				Value(&m.formOrchestrator),
+			huh.NewSelect[string]().
+				Title("Worker model").
+				Description("Applied to subagents").
+				Options(modelOpts...).
+				Value(&m.formWorker),
+		),
+	)
+
+	m.view = viewForm
+	return m, m.form.Init()
+}
+
+func (m *Model) rebuildMappingList() {
+	items := buildMappingItems(m.routing)
+	m.mappingList.SetItems(items)
+}
+
+// refreshTargetModels updates the in-memory Target.Model values to reflect
+// the models that were just applied by ApplyActiveMapping. This prevents
+// subsequent activation attempts from incorrectly showing "will overwrite"
+// warnings for models that were set by the current activation.
+func (m *Model) refreshTargetModels(applied config.Mapping) {
+	for i := range m.state.Targets {
+		role := config.RoleForTarget(m.state.Targets[i])
+		if role == config.RoleOrchestrator {
+			m.state.Targets[i].Model = applied.Orchestrator
+		} else {
+			m.state.Targets[i].Model = applied.Worker
+		}
+	}
 }
 
 // -- View --------------------------------------------------------------------
 
 func (m Model) View() string {
 	var content string
-	if m.view == viewTargets {
-		content = m.targetList.View()
-	} else {
-		content = m.modelList.View()
-	}
 
-	if m.status != "" {
-		content += "\n" + statusStyle.Render(m.status)
+	switch m.view {
+	case viewMappings:
+		content = m.mappingList.View()
+		if len(m.warnings) > 0 {
+			content += "\n" + warningStyle.Render("⚠ "+strings.Join(m.warnings, "; "))
+		}
+		if m.status != "" {
+			content += "\n" + statusStyle.Render(m.status)
+		}
+		content += "\n" + lipgloss.NewStyle().Faint(true).Render("enter: edit  a: activate  d: delete  q: quit")
+
+	case viewForm:
+		if m.form != nil {
+			content = m.form.View()
+		}
 	}
 
 	return appStyle.Render(content)

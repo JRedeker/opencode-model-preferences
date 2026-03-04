@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tidwall/gjson"
 )
 
 // -- CLI-first model source tests --------------------------------------------
@@ -486,47 +488,6 @@ Content here
 	}
 }
 
-func TestSetModel(t *testing.T) {
-	// Create a temp config
-	dir := t.TempDir()
-	configPath := filepath.Join(dir, "opencode.json")
-	initial := `{
-  "agent": {
-    "build": {}
-  }
-}`
-	os.WriteFile(configPath, []byte(initial), 0644)
-
-	// Override config dir for this test
-	os.Setenv("OPENCODE_CONFIG_DIR", dir)
-	defer os.Unsetenv("OPENCODE_CONFIG_DIR")
-
-	// Set a model
-	err := SetModel(KindAgent, "build", "anthropic/claude-sonnet-4")
-	if err != nil {
-		t.Fatalf("SetModel: %v", err)
-	}
-
-	// Read back and verify
-	data, _ := os.ReadFile(configPath)
-	raw := string(data)
-	if !strings.Contains(raw, `"anthropic/claude-sonnet-4"`) {
-		t.Errorf("config should contain model, got: %s", raw)
-	}
-
-	// Clear the model
-	err = SetModel(KindAgent, "build", "")
-	if err != nil {
-		t.Fatalf("SetModel clear: %v", err)
-	}
-
-	data, _ = os.ReadFile(configPath)
-	raw = string(data)
-	if strings.Contains(raw, "claude-sonnet-4") {
-		t.Errorf("config should not contain model after clear, got: %s", raw)
-	}
-}
-
 func TestSetAgentOrder_ReordersKeys(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "opencode.json")
@@ -539,8 +500,7 @@ func TestSetAgentOrder_ReordersKeys(t *testing.T) {
   }
 }`
 	os.WriteFile(configPath, []byte(initial), 0644)
-	os.Setenv("OPENCODE_CONFIG_DIR", dir)
-	defer os.Unsetenv("OPENCODE_CONFIG_DIR")
+	t.Setenv("OPENCODE_CONFIG_DIR", dir)
 
 	// Reorder: refine before scout
 	err := SetAgentOrder([]string{"refine", "scout"})
@@ -572,8 +532,7 @@ func TestSetAgentOrder_PreservesValues(t *testing.T) {
   }
 }`
 	os.WriteFile(configPath, []byte(initial), 0644)
-	os.Setenv("OPENCODE_CONFIG_DIR", dir)
-	defer os.Unsetenv("OPENCODE_CONFIG_DIR")
+	t.Setenv("OPENCODE_CONFIG_DIR", dir)
 
 	err := SetAgentOrder([]string{"refine", "scout"})
 	if err != nil {
@@ -601,8 +560,7 @@ func TestSetAgentOrder_SkipsUnknownNames(t *testing.T) {
   }
 }`
 	os.WriteFile(configPath, []byte(initial), 0644)
-	os.Setenv("OPENCODE_CONFIG_DIR", dir)
-	defer os.Unsetenv("OPENCODE_CONFIG_DIR")
+	t.Setenv("OPENCODE_CONFIG_DIR", dir)
 
 	// includes a nonexistent name — should not error and should preserve both real agents
 	err := SetAgentOrder([]string{"refine", "nonexistent", "scout"})
@@ -626,8 +584,7 @@ func TestSetAgentOrder_NoOpWithEmptyAgentSection(t *testing.T) {
 	configPath := filepath.Join(dir, "opencode.json")
 	initial := `{"theme": "dark"}`
 	os.WriteFile(configPath, []byte(initial), 0644)
-	os.Setenv("OPENCODE_CONFIG_DIR", dir)
-	defer os.Unsetenv("OPENCODE_CONFIG_DIR")
+	t.Setenv("OPENCODE_CONFIG_DIR", dir)
 
 	err := SetAgentOrder([]string{"build", "plan"})
 	if err != nil {
@@ -757,6 +714,263 @@ You are a security auditor.
 	}
 }
 
+// -- Routing config tests ----------------------------------------------------
+
+func TestRoutingPath_RespectsOPENCODE_CONFIG_DIR(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("OPENCODE_CONFIG_DIR", dir)
+	got := RoutingPath()
+	want := filepath.Join(dir, "omp-routing.json")
+	if got != want {
+		t.Errorf("RoutingPath() = %q, want %q", got, want)
+	}
+}
+
+func TestLoadRouting_FileNotExist(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("OPENCODE_CONFIG_DIR", dir)
+	rc, err := LoadRouting()
+	if err != nil {
+		t.Fatalf("LoadRouting() error on missing file: %v", err)
+	}
+	if len(rc.Mappings) != 0 {
+		t.Errorf("expected empty mappings, got %d", len(rc.Mappings))
+	}
+}
+
+func TestLoadRouting_ExistingFile(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("OPENCODE_CONFIG_DIR", dir)
+	content := `{"mappings":[{"name":"fast","orchestrator":"openai/gpt-4o-mini","worker":"openai/gpt-4o-mini"}]}`
+	os.WriteFile(filepath.Join(dir, "omp-routing.json"), []byte(content), 0644)
+
+	rc, err := LoadRouting()
+	if err != nil {
+		t.Fatalf("LoadRouting() error: %v", err)
+	}
+	if len(rc.Mappings) != 1 {
+		t.Fatalf("expected 1 mapping, got %d", len(rc.Mappings))
+	}
+	if rc.Mappings[0].Name != "fast" {
+		t.Errorf("mapping name = %q, want fast", rc.Mappings[0].Name)
+	}
+	if rc.Mappings[0].Orchestrator != "openai/gpt-4o-mini" {
+		t.Errorf("orchestrator = %q, want openai/gpt-4o-mini", rc.Mappings[0].Orchestrator)
+	}
+}
+
+func TestSaveRouting_CreatesFile(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("OPENCODE_CONFIG_DIR", dir)
+	rc := RoutingConfig{
+		Mappings: []Mapping{
+			{Name: "quality", Orchestrator: "anthropic/claude-opus-4", Worker: "anthropic/claude-haiku-4"},
+		},
+	}
+	if err := SaveRouting(rc); err != nil {
+		t.Fatalf("SaveRouting() error: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "omp-routing.json"))
+	if err != nil {
+		t.Fatalf("reading saved file: %v", err)
+	}
+	if !strings.Contains(string(data), "quality") {
+		t.Errorf("saved file should contain mapping name, got: %s", data)
+	}
+}
+
+func TestSaveRouting_OverwritesExisting(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("OPENCODE_CONFIG_DIR", dir)
+	os.WriteFile(filepath.Join(dir, "omp-routing.json"), []byte(`{"mappings":[]}`), 0644)
+
+	rc := RoutingConfig{
+		Mappings: []Mapping{
+			{Name: "new", Orchestrator: "openai/gpt-5", Worker: "openai/gpt-4o-mini"},
+		},
+	}
+	if err := SaveRouting(rc); err != nil {
+		t.Fatalf("SaveRouting() error: %v", err)
+	}
+	loaded, _ := LoadRouting()
+	if len(loaded.Mappings) != 1 || loaded.Mappings[0].Name != "new" {
+		t.Errorf("expected overwritten mapping 'new', got %+v", loaded.Mappings)
+	}
+}
+
+// TestSaveRouting_AtomicWrite verifies that SaveRouting leaves no temp files
+// behind after a successful write (atomic temp+rename pattern).
+func TestSaveRouting_AtomicWrite(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("OPENCODE_CONFIG_DIR", dir)
+
+	rc := RoutingConfig{
+		Mappings: []Mapping{{Name: "atomic", Orchestrator: "openai/gpt-5", Worker: "openai/gpt-4o-mini"}},
+	}
+	if err := SaveRouting(rc); err != nil {
+		t.Fatalf("SaveRouting() error: %v", err)
+	}
+
+	// No temp files should remain
+	entries, _ := os.ReadDir(dir)
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".omp-routing-") && strings.HasSuffix(e.Name(), ".tmp") {
+			t.Errorf("temp file left behind after SaveRouting: %s", e.Name())
+		}
+	}
+
+	// The routing file should be valid JSON
+	loaded, err := LoadRouting()
+	if err != nil {
+		t.Fatalf("LoadRouting after atomic save: %v", err)
+	}
+	if len(loaded.Mappings) != 1 || loaded.Mappings[0].Name != "atomic" {
+		t.Errorf("expected mapping 'atomic', got %+v", loaded.Mappings)
+	}
+}
+
+// -- ApplyActiveMapping tests ------------------------------------------------
+
+func TestApplyActiveMapping(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("OPENCODE_CONFIG_DIR", dir)
+
+	// Config with a mix of agent types and a command
+	initial := `{
+  "agent": {
+    "build": {"mode": "primary"},
+    "plan": {"mode": "primary"},
+    "general": {"mode": "subagent"},
+    "explore": {"mode": "subagent"},
+    "scout": {"mode": "all"}
+  },
+  "command": {
+    "deploy": {}
+  }
+}`
+	os.WriteFile(filepath.Join(dir, "opencode.json"), []byte(initial), 0644)
+
+	targets := []Target{
+		{Name: "build", Kind: KindAgent, Mode: "primary"},
+		{Name: "plan", Kind: KindAgent, Mode: "primary"},
+		{Name: "general", Kind: KindAgent, Mode: "subagent"},
+		{Name: "explore", Kind: KindAgent, Mode: "subagent"},
+		{Name: "scout", Kind: KindAgent, Mode: "all"},
+		{Name: "deploy", Kind: KindCommand},
+	}
+	m := Mapping{Name: "quality", Orchestrator: "anthropic/claude-opus-4", Worker: "anthropic/claude-haiku-4"}
+
+	if err := ApplyActiveMapping(m, targets); err != nil {
+		t.Fatalf("ApplyActiveMapping() error: %v", err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(dir, "opencode.json"))
+	raw := string(data)
+
+	// Verify via gjson
+	for _, name := range []string{"build", "plan", "scout"} {
+		got := gjson.Get(raw, "agent."+name+".model").String()
+		if got != "anthropic/claude-opus-4" {
+			t.Errorf("agent %q model = %q, want orchestrator model", name, got)
+		}
+	}
+	for _, name := range []string{"general", "explore"} {
+		got := gjson.Get(raw, "agent."+name+".model").String()
+		if got != "anthropic/claude-haiku-4" {
+			t.Errorf("agent %q model = %q, want worker model", name, got)
+		}
+	}
+	// Command gets orchestrator model
+	got := gjson.Get(raw, "command.deploy.model").String()
+	if got != "anthropic/claude-opus-4" {
+		t.Errorf("command deploy model = %q, want orchestrator model", got)
+	}
+}
+
+func TestApplyActiveMapping_ClearAll(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("OPENCODE_CONFIG_DIR", dir)
+
+	initial := `{
+  "agent": {
+    "build": {"model": "anthropic/claude-opus-4"},
+    "general": {"model": "anthropic/claude-haiku-4"}
+  }
+}`
+	os.WriteFile(filepath.Join(dir, "opencode.json"), []byte(initial), 0644)
+
+	targets := []Target{
+		{Name: "build", Kind: KindAgent, Mode: "primary"},
+		{Name: "general", Kind: KindAgent, Mode: "subagent"},
+	}
+
+	if err := ClearAllModelAssignments(targets); err != nil {
+		t.Fatalf("ClearAllModelAssignments() error: %v", err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(dir, "opencode.json"))
+	raw := string(data)
+
+	if gjson.Get(raw, "agent.build.model").Exists() {
+		t.Error("build model should be cleared")
+	}
+	if gjson.Get(raw, "agent.general.model").Exists() {
+		t.Error("general model should be cleared")
+	}
+}
+
+func TestValidateMapping(t *testing.T) {
+	knownModels := []Model{
+		{ID: "anthropic/claude-opus-4"},
+		{ID: "anthropic/claude-haiku-4"},
+		{ID: "openai/gpt-5"},
+	}
+	cases := []struct {
+		name    string
+		mapping Mapping
+		wantErr bool
+	}{
+		{"valid mapping", Mapping{Name: "q", Orchestrator: "anthropic/claude-opus-4", Worker: "anthropic/claude-haiku-4"}, false},
+		{"invalid orchestrator", Mapping{Name: "q", Orchestrator: "fake/unknown", Worker: "anthropic/claude-haiku-4"}, true},
+		{"invalid worker", Mapping{Name: "q", Orchestrator: "anthropic/claude-opus-4", Worker: "fake/unknown"}, true},
+		{"both invalid", Mapping{Name: "q", Orchestrator: "fake/a", Worker: "fake/b"}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			warnings := ValidateMapping(tc.mapping, knownModels)
+			if tc.wantErr && len(warnings) == 0 {
+				t.Error("expected warnings, got none")
+			}
+			if !tc.wantErr && len(warnings) > 0 {
+				t.Errorf("expected no warnings, got: %v", warnings)
+			}
+		})
+	}
+}
+
+func TestRoleForTarget(t *testing.T) {
+	cases := []struct {
+		name   string
+		target Target
+		want   Role
+	}{
+		{"primary agent is orchestrator", Target{Kind: KindAgent, Mode: "primary"}, RoleOrchestrator},
+		{"subagent is worker", Target{Kind: KindAgent, Mode: "subagent"}, RoleWorker},
+		{"all mode is orchestrator", Target{Kind: KindAgent, Mode: "all"}, RoleOrchestrator},
+		{"empty mode is orchestrator", Target{Kind: KindAgent, Mode: ""}, RoleOrchestrator},
+		{"command is orchestrator", Target{Kind: KindCommand}, RoleOrchestrator},
+		{"command with arbitrary mode is still orchestrator", Target{Kind: KindCommand, Mode: "subagent"}, RoleOrchestrator},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := RoleForTarget(tc.target)
+			if got != tc.want {
+				t.Errorf("RoleForTarget(%+v) = %q, want %q", tc.target, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestBuiltInAgentsLocked(t *testing.T) {
 	raw := []byte(`{}`)
 	targets := discoverTargets("/nonexistent", raw)
@@ -771,6 +985,50 @@ func TestBuiltInAgentsLocked(t *testing.T) {
 			if tgt.Locked {
 				t.Errorf("agent %q should be Locked=false", tgt.Name)
 			}
+		}
+	}
+}
+
+// -- Role taxonomy tests -----------------------------------------------------
+
+func TestUserRoles_AllFiveDeclared(t *testing.T) {
+	want := []UserRole{RoleBrain, RoleTasker, RoleBuilder, RoleLibrarian, RoleFixer}
+	got := AllUserRoles()
+	if len(got) != len(want) {
+		t.Fatalf("AllUserRoles() returned %d roles, want %d: %v", len(got), len(want), got)
+	}
+	byRole := make(map[UserRole]bool)
+	for _, r := range got {
+		byRole[r] = true
+	}
+	for _, r := range want {
+		if !byRole[r] {
+			t.Errorf("missing role %q in AllUserRoles()", r)
+		}
+	}
+}
+
+func TestUserRoles_DescriptionsNonEmpty(t *testing.T) {
+	for _, r := range AllUserRoles() {
+		if UserRoleDescription(r) == "" {
+			t.Errorf("UserRoleDescription(%q) is empty", r)
+		}
+	}
+}
+
+func TestUserRoles_DoNotAffectRoleForTarget(t *testing.T) {
+	// Declaring user roles must not change how RoleForTarget classifies targets.
+	cases := []struct {
+		target Target
+		want   Role
+	}{
+		{Target{Kind: KindAgent, Mode: "primary"}, RoleOrchestrator},
+		{Target{Kind: KindAgent, Mode: "subagent"}, RoleWorker},
+		{Target{Kind: KindCommand}, RoleOrchestrator},
+	}
+	for _, tc := range cases {
+		if got := RoleForTarget(tc.target); got != tc.want {
+			t.Errorf("RoleForTarget(%+v) = %q, want %q (user roles must not affect routing)", tc.target, got, tc.want)
 		}
 	}
 }
