@@ -1,10 +1,11 @@
 // Package tui implements the Bubbletea TUI for model routing management.
 //
-// Two views:
+// Three views, all using bubbles/list for consistent UX:
 //   - Agents view: list of agents/commands with current model and assigned role.
 //     Press 'r' to assign a role, 'a' to apply routing to opencode.json.
 //   - Roles view: list of 5 roles with their mapped model.
 //     Press 'enter' to pick a model for a role.
+//   - Picker view: full list.Model for selecting a role or model, with filtering.
 //
 // Roles are purely for model mapping — they carry no context or system prompt.
 // If a role has no model mapped, targets assigned to it keep their existing model.
@@ -19,7 +20,6 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -88,6 +88,16 @@ func (r roleItem) Title() string       { return string(r.role) }
 func (r roleItem) Description() string { return fmt.Sprintf("%s  →  %s", r.desc, r.model) }
 func (r roleItem) FilterValue() string { return string(r.role) + " " + r.model }
 
+// pickItem is a selectable option in a picker list (role or model).
+type pickItem struct {
+	label string
+	value string // empty string = "clear" option
+}
+
+func (p pickItem) Title() string       { return p.label }
+func (p pickItem) Description() string { return "" }
+func (p pickItem) FilterValue() string { return p.label }
+
 // -- Item builders -----------------------------------------------------------
 
 func buildTargetItems(targets []config.Target, routing config.RoutingConfig) []list.Item {
@@ -135,6 +145,29 @@ func buildRoleItems(routing config.RoutingConfig) []list.Item {
 	return items
 }
 
+func buildRolePickItems() []list.Item {
+	items := []list.Item{
+		pickItem{label: "(none — clear role)", value: ""},
+	}
+	for _, r := range config.AllUserRoles() {
+		items = append(items, pickItem{
+			label: fmt.Sprintf("%s — %s", r, config.UserRoleDescription(r)),
+			value: string(r),
+		})
+	}
+	return items
+}
+
+func buildModelPickItems(models []config.Model) []list.Item {
+	items := []list.Item{
+		pickItem{label: "(none — clear model)", value: ""},
+	}
+	for _, mdl := range models {
+		items = append(items, pickItem{label: mdl.ID, value: mdl.ID})
+	}
+	return items
+}
+
 // -- Delegate ----------------------------------------------------------------
 
 type itemDelegate struct {
@@ -164,6 +197,34 @@ func (d itemDelegate) Render(w io.Writer, m list.Model, index int, item list.Ite
 	d.inner.Render(w, m, index, item)
 }
 
+// -- Pick delegate (single-line items, no description) -----------------------
+
+type pickDelegate struct{}
+
+func (d pickDelegate) Height() int                             { return 1 }
+func (d pickDelegate) Spacing() int                            { return 0 }
+func (d pickDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd { return nil }
+func (d pickDelegate) ShortHelp() []key.Binding                { return nil }
+func (d pickDelegate) FullHelp() [][]key.Binding               { return nil }
+
+func (d pickDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
+	pi, ok := item.(pickItem)
+	if !ok {
+		return
+	}
+	cursor := "  "
+	style := lipgloss.NewStyle()
+	if index == m.Index() {
+		cursor = "> "
+		style = style.Foreground(lipgloss.Color("#7D56F4")).Bold(true)
+	}
+	label := pi.label
+	if m.Width() > 4 {
+		label = ansi.Truncate(label, m.Width()-4, "…")
+	}
+	fmt.Fprint(w, cursor+style.Render(label)) //nolint: errcheck
+}
+
 // -- View state --------------------------------------------------------------
 
 type viewState int
@@ -171,7 +232,15 @@ type viewState int
 const (
 	viewAgents viewState = iota // agent/command list
 	viewRoles                   // role→model list
-	viewForm                    // huh form (role picker or model picker)
+	viewPicker                  // picker list (role or model selection)
+)
+
+// pickerKind tracks what the picker is selecting.
+type pickerKind int
+
+const (
+	pickRole  pickerKind = iota // picking a role for a target
+	pickModel                   // picking a model for a role
 )
 
 // -- Messages ----------------------------------------------------------------
@@ -182,7 +251,7 @@ type saveRoutingMsg struct{ err error }
 type rolePickDoneMsg struct {
 	targetName string
 	role       config.UserRole
-	cleared    bool // true = user chose to clear the role
+	cleared    bool
 }
 
 type modelPickDoneMsg struct {
@@ -199,15 +268,14 @@ type Model struct {
 	routing config.RoutingConfig
 	view    viewState
 
-	agentList list.Model
-	roleList  list.Model
-	form      *huh.Form
+	agentList  list.Model
+	roleList   list.Model
+	pickerList list.Model
 
-	// form context
-	formRoleValue  string          // bound to huh select for role picker
-	formModelValue string          // bound to huh select for model picker
-	formTargetName string          // which target we're assigning a role to
-	formRole       config.UserRole // which role we're assigning a model to
+	// picker context
+	pickerKind       pickerKind
+	pickerTargetName string          // which target (for role picker)
+	pickerRole       config.UserRole // which role (for model picker)
 
 	status string
 	width  int
@@ -232,12 +300,19 @@ func New(state *config.State, routing config.RoutingConfig) Model {
 	rl.SetShowStatusBar(false)
 	rl.SetFilteringEnabled(false)
 
+	// Picker starts empty; populated when opened
+	pl := list.New(nil, pickDelegate{}, 0, 0)
+	pl.Styles.Title = titleStyle
+	pl.SetShowStatusBar(true)
+	pl.SetFilteringEnabled(true)
+
 	return Model{
-		state:     state,
-		routing:   routing,
-		view:      viewAgents,
-		agentList: al,
-		roleList:  rl,
+		state:      state,
+		routing:    routing,
+		view:       viewAgents,
+		agentList:  al,
+		roleList:   rl,
+		pickerList: pl,
 	}
 }
 
@@ -257,6 +332,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Role list needs less height: 5 summary lines + help + status + padding
 		roleExtra := 9
 		m.roleList.SetSize(msg.Width-h, msg.Height-v-roleExtra)
+		m.pickerList.SetSize(msg.Width-h, msg.Height-v)
 		return m, nil
 
 	case applyResultMsg:
@@ -276,29 +352,50 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case rolePickDoneMsg:
 		if msg.cleared {
 			delete(m.routing.TargetRoles, msg.targetName)
+			m.status = fmt.Sprintf("Cleared role for %s", msg.targetName)
 		} else {
 			m.routing.TargetRoles[msg.targetName] = msg.role
+			m.status = fmt.Sprintf("Set %s → %s", msg.targetName, msg.role)
 		}
 		m.view = viewAgents
 		m.rebuildAgentList()
-		m.status = fmt.Sprintf("Set %s → %s", msg.targetName, msg.role)
 		return m, m.saveRoutingCmd()
 
 	case modelPickDoneMsg:
 		if msg.cleared {
 			delete(m.routing.RoleModels, msg.role)
+			m.status = fmt.Sprintf("Cleared model for %s", msg.role)
 		} else {
 			m.routing.RoleModels[msg.role] = msg.model
+			m.status = fmt.Sprintf("Set %s → %s", msg.role, msg.model)
 		}
 		m.view = viewRoles
 		m.rebuildRoleList()
-		m.status = fmt.Sprintf("Set %s → %s", msg.role, msg.model)
 		return m, m.saveRoutingCmd()
 
 	case tea.KeyMsg:
-		if m.view == viewForm {
-			break // form handles its own keys
+		// Picker view: enter selects, esc goes back
+		if m.view == viewPicker {
+			if m.pickerList.FilterState() == list.Filtering {
+				break // let filter handle keys
+			}
+			switch {
+			case key.Matches(msg, key.NewBinding(key.WithKeys("enter"))):
+				return m.handlePickerSelect()
+			case key.Matches(msg, key.NewBinding(key.WithKeys("esc"))):
+				if m.pickerKind == pickRole {
+					m.view = viewAgents
+				} else {
+					m.view = viewRoles
+				}
+				m.status = ""
+				return m, nil
+			case key.Matches(msg, key.NewBinding(key.WithKeys("q", "ctrl+c"))):
+				return m, tea.Quit
+			}
+			break
 		}
+
 		if m.activeList().FilterState() == list.Filtering {
 			break
 		}
@@ -347,27 +444,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.agentList, cmd = m.agentList.Update(msg)
 	case viewRoles:
 		m.roleList, cmd = m.roleList.Update(msg)
-	case viewForm:
-		if m.form != nil {
-			form, fCmd := m.form.Update(msg)
-			if f, ok := form.(*huh.Form); ok {
-				m.form = f
-			}
-			if m.form.State == huh.StateCompleted {
-				return m, m.handleFormComplete()
-			}
-			if m.form.State == huh.StateAborted {
-				// Return to previous view
-				if m.formTargetName != "" {
-					m.view = viewAgents
-				} else {
-					m.view = viewRoles
-				}
-				m.status = ""
-				return m, nil
-			}
-			cmd = fCmd
-		}
+	case viewPicker:
+		m.pickerList, cmd = m.pickerList.Update(msg)
 	}
 	return m, cmd
 }
@@ -379,101 +457,71 @@ func (m *Model) activeList() *list.Model {
 	return &m.agentList
 }
 
-// openRolePicker opens a huh form to assign a role to the selected agent.
+// openRolePicker opens a list picker to assign a role to the selected agent.
 func (m Model) openRolePicker() (tea.Model, tea.Cmd) {
 	item, ok := m.agentList.SelectedItem().(targetItem)
 	if !ok {
 		return m, nil
 	}
 
-	opts := []huh.Option[string]{
-		huh.NewOption("(none — clear role)", ""),
-	}
-	for _, r := range config.AllUserRoles() {
-		label := fmt.Sprintf("%s — %s", r, config.UserRoleDescription(r))
-		opts = append(opts, huh.NewOption(label, string(r)))
-	}
+	items := buildRolePickItems()
+	m.pickerList.SetItems(items)
+	m.pickerList.Title = fmt.Sprintf("Role for %s", item.target.Name)
+	m.pickerList.ResetFilter()
+	m.pickerList.Select(0)
 
-	// Pre-select current role
-	m.formRoleValue = ""
-	if r, ok := m.routing.TargetRoles[item.target.Name]; ok {
-		m.formRoleValue = string(r)
-	}
-
-	m.formTargetName = item.target.Name
-	m.formRole = "" // not used for role picker
-	m.form = huh.NewForm(
-		huh.NewGroup(
-			huh.NewSelect[string]().
-				Title(fmt.Sprintf("Role for %s", item.target.Name)).
-				Description("Assign a role to this agent/command").
-				Options(opts...).
-				Height(m.formHeight()).
-				Value(&m.formRoleValue),
-		),
-	).WithHeight(m.formHeight()).WithKeyMap(selectKeyMap())
-
-	m.view = viewForm
-	return m, m.form.Init()
+	m.pickerKind = pickRole
+	m.pickerTargetName = item.target.Name
+	m.view = viewPicker
+	m.status = ""
+	return m, nil
 }
 
-// openModelPicker opens a huh form to assign a model to the selected role.
+// openModelPicker opens a list picker to assign a model to the selected role.
 func (m Model) openModelPicker() (tea.Model, tea.Cmd) {
 	item, ok := m.roleList.SelectedItem().(roleItem)
 	if !ok {
 		return m, nil
 	}
 
-	opts := []huh.Option[string]{
-		huh.NewOption("(none — clear model)", ""),
-	}
-	for _, mdl := range m.state.Models {
-		opts = append(opts, huh.NewOption(mdl.ID, mdl.ID))
-	}
+	items := buildModelPickItems(m.state.Models)
+	m.pickerList.SetItems(items)
+	m.pickerList.Title = fmt.Sprintf("Model for %s", item.role)
+	m.pickerList.ResetFilter()
+	m.pickerList.Select(0)
 
-	// Pre-select current model
-	m.formModelValue = ""
-	if mdl, ok := m.routing.RoleModels[item.role]; ok {
-		m.formModelValue = mdl
-	}
-
-	m.formTargetName = "" // not used for model picker
-	m.formRole = item.role
-	m.form = huh.NewForm(
-		huh.NewGroup(
-			huh.NewSelect[string]().
-				Title(fmt.Sprintf("Model for %s", item.role)).
-				Description(config.UserRoleDescription(item.role)).
-				Options(opts...).
-				Height(m.formHeight()).
-				Value(&m.formModelValue),
-		),
-	).WithHeight(m.formHeight()).WithKeyMap(selectKeyMap())
-
-	m.view = viewForm
-	return m, m.form.Init()
+	m.pickerKind = pickModel
+	m.pickerRole = item.role
+	m.view = viewPicker
+	m.status = ""
+	return m, nil
 }
 
-func (m Model) handleFormComplete() tea.Cmd {
-	if m.formTargetName != "" {
-		// Role picker completed
-		targetName := m.formTargetName
-		roleVal := m.formRoleValue
-		return func() tea.Msg {
-			if roleVal == "" {
+func (m Model) handlePickerSelect() (tea.Model, tea.Cmd) {
+	item, ok := m.pickerList.SelectedItem().(pickItem)
+	if !ok {
+		return m, nil
+	}
+
+	if m.pickerKind == pickRole {
+		targetName := m.pickerTargetName
+		value := item.value
+		return m, func() tea.Msg {
+			if value == "" {
 				return rolePickDoneMsg{targetName: targetName, cleared: true}
 			}
-			return rolePickDoneMsg{targetName: targetName, role: config.UserRole(roleVal)}
+			return rolePickDoneMsg{targetName: targetName, role: config.UserRole(value)}
 		}
 	}
-	// Model picker completed
-	role := m.formRole
-	modelVal := m.formModelValue
-	return func() tea.Msg {
-		if modelVal == "" {
+
+	// Model picker
+	role := m.pickerRole
+	value := item.value
+	return m, func() tea.Msg {
+		if value == "" {
 			return modelPickDoneMsg{role: role, cleared: true}
 		}
-		return modelPickDoneMsg{role: role, model: modelVal}
+		return modelPickDoneMsg{role: role, model: value}
 	}
 }
 
@@ -492,35 +540,6 @@ func (m Model) saveRoutingCmd() tea.Cmd {
 		err := config.SaveRouting(routing)
 		return saveRoutingMsg{err: err}
 	}
-}
-
-// selectKeyMap returns a custom huh KeyMap that adds left/right arrow keys
-// as page-up/page-down for navigating long select lists.
-func selectKeyMap() *huh.KeyMap {
-	km := huh.NewDefaultKeyMap()
-	km.Select.HalfPageUp = key.NewBinding(
-		key.WithKeys("ctrl+u", "left"),
-		key.WithHelp("←/ctrl+u", "½ page up"),
-	)
-	km.Select.HalfPageDown = key.NewBinding(
-		key.WithKeys("ctrl+d", "right"),
-		key.WithHelp("→/ctrl+d", "½ page down"),
-	)
-	return km
-}
-
-// formHeight returns the available height for huh forms, accounting for
-// the app padding. Falls back to a reasonable default if size is unknown.
-func (m Model) formHeight() int {
-	if m.height <= 0 {
-		return 20
-	}
-	_, v := appStyle.GetFrameSize()
-	h := m.height - v - 2 // 2 for breathing room
-	if h < 10 {
-		h = 10
-	}
-	return h
 }
 
 func (m *Model) rebuildAgentList() {
@@ -562,10 +581,9 @@ func (m Model) View() string {
 		content += "\n" + strings.Join(summary, "\n")
 		content += "\n" + faintStyle.Render("enter: set model  tab: agents view  esc: back  q: quit")
 
-	case viewForm:
-		if m.form != nil {
-			content = m.form.View()
-		}
+	case viewPicker:
+		content = m.pickerList.View()
+		content += "\n" + faintStyle.Render("enter: select  /: filter  esc: cancel")
 	}
 
 	return appStyle.Render(content)
