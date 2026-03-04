@@ -701,6 +701,62 @@ You explore.
 	}
 }
 
+func TestDiscoverTargets_DescriptionFromJSON(t *testing.T) {
+	raw := []byte(`{
+		"agent": {
+			"adv-reviewer": {
+				"mode": "subagent",
+				"hidden": true,
+				"description": "Lead review synthesizer"
+			}
+		}
+	}`)
+
+	targets := discoverTargets("/nonexistent", raw)
+
+	var reviewer *Target
+	for i := range targets {
+		if targets[i].Name == "adv-reviewer" {
+			reviewer = &targets[i]
+			break
+		}
+	}
+	if reviewer == nil {
+		t.Fatal("adv-reviewer not found in targets")
+	}
+	if reviewer.Description != "Lead review synthesizer" {
+		t.Errorf("description = %q, want %q", reviewer.Description, "Lead review synthesizer")
+	}
+	if !reviewer.Hidden {
+		t.Error("adv-reviewer should have Hidden=true")
+	}
+}
+
+func TestDiscoverMarkdownAgents_DescriptionFromFrontmatter(t *testing.T) {
+	dir := t.TempDir()
+
+	content := `---
+description: Security auditor for OWASP checks
+mode: subagent
+hidden: true
+---
+
+You are a security auditor.
+`
+	os.WriteFile(filepath.Join(dir, "adv-security-reviewer.md"), []byte(content), 0644)
+
+	raw := []byte(`{}`)
+	seen := make(map[string]bool)
+	targets := discoverMarkdownAgents(dir, raw, seen)
+
+	if len(targets) != 1 {
+		t.Fatalf("expected 1 agent, got %d", len(targets))
+	}
+	if targets[0].Description != "Security auditor for OWASP checks" {
+		t.Errorf("description = %q, want %q", targets[0].Description, "Security auditor for OWASP checks")
+	}
+}
+
 func TestBuiltInAgentsLocked(t *testing.T) {
 	raw := []byte(`{}`)
 	targets := discoverTargets("/nonexistent", raw)

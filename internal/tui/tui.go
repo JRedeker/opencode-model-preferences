@@ -66,6 +66,9 @@ func (t targetItem) Description() string {
 	} else {
 		parts = append(parts, "model: (default)")
 	}
+	if t.target.Description != "" {
+		parts = append(parts, t.target.Description)
+	}
 	return strings.Join(parts, " | ")
 }
 func (t targetItem) FilterValue() string { return t.target.Name }

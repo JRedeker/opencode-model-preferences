@@ -28,13 +28,14 @@ const (
 
 // Target represents an agent or command that can have a model preference.
 type Target struct {
-	Name    string
-	Kind    TargetKind
-	Mode    string // "primary", "subagent", "system" (agents only)
-	Model   string // current model preference, empty = none
-	BuiltIn bool
-	Locked  bool // true for built-in primary agents whose cycle order is fixed by OpenCode
-	Hidden  bool // true when frontmatter sets hidden: true
+	Name        string
+	Kind        TargetKind
+	Mode        string // "primary", "subagent", "system" (agents only)
+	Model       string // current model preference, empty = none
+	Description string // one-line purpose description, shown in TUI
+	BuiltIn     bool
+	Locked      bool // true for built-in primary agents whose cycle order is fixed by OpenCode
+	Hidden      bool // true when frontmatter sets hidden: true
 }
 
 // Model represents an available model from a provider.
@@ -189,11 +190,14 @@ func discoverTargets(configDir string, raw []byte) []Target {
 		if mode == "" {
 			mode = "all"
 		}
+		hidden := val.Get("hidden").Bool()
 		targets = append(targets, Target{
-			Name:  n,
-			Kind:  KindAgent,
-			Mode:  mode,
-			Model: val.Get("model").String(),
+			Name:        n,
+			Kind:        KindAgent,
+			Mode:        mode,
+			Model:       val.Get("model").String(),
+			Description: val.Get("description").String(),
+			Hidden:      hidden,
 		})
 		seen[n] = true
 		return true
@@ -294,12 +298,15 @@ func discoverMarkdownAgents(dir string, raw []byte, seen map[string]bool) []Targ
 			model = parseFrontmatterField(agentPath, "model")
 		}
 
+		description := parseFrontmatterField(agentPath, "description")
+
 		targets = append(targets, Target{
-			Name:   name,
-			Kind:   KindAgent,
-			Mode:   mode,
-			Model:  model,
-			Hidden: hidden,
+			Name:        name,
+			Kind:        KindAgent,
+			Mode:        mode,
+			Model:       model,
+			Description: description,
+			Hidden:      hidden,
 		})
 		seen[name] = true
 	}
