@@ -642,6 +642,65 @@ func TestSetAgentOrder_NoOpWithEmptyAgentSection(t *testing.T) {
 	}
 }
 
+func TestDiscoverMarkdownAgents_HiddenField(t *testing.T) {
+	dir := t.TempDir()
+
+	// hidden: true agent
+	hiddenContent := `---
+description: Internal researcher
+mode: subagent
+hidden: true
+---
+
+You are hidden.
+`
+	os.WriteFile(filepath.Join(dir, "adv-researcher.md"), []byte(hiddenContent), 0644)
+
+	// hidden: false agent (explicit)
+	visibleContent := `---
+description: Librarian
+mode: subagent
+hidden: false
+---
+
+You are visible.
+`
+	os.WriteFile(filepath.Join(dir, "librarian.md"), []byte(visibleContent), 0644)
+
+	// no hidden field (defaults to false)
+	defaultContent := `---
+description: Explorer
+mode: subagent
+---
+
+You explore.
+`
+	os.WriteFile(filepath.Join(dir, "explore-custom.md"), []byte(defaultContent), 0644)
+
+	raw := []byte(`{}`)
+	seen := make(map[string]bool)
+	targets := discoverMarkdownAgents(dir, raw, seen)
+
+	if len(targets) != 3 {
+		t.Fatalf("expected 3 agents, got %d", len(targets))
+	}
+
+	byName := make(map[string]Target)
+	for _, tgt := range targets {
+		byName[tgt.Name] = tgt
+	}
+
+	if !byName["adv-researcher"].Hidden {
+		t.Error("adv-researcher should have Hidden=true")
+	}
+	if byName["librarian"].Hidden {
+		t.Error("librarian should have Hidden=false (explicit)")
+	}
+	if byName["explore-custom"].Hidden {
+		t.Error("explore-custom should have Hidden=false (default)")
+	}
+}
+
 func TestBuiltInAgentsLocked(t *testing.T) {
 	raw := []byte(`{}`)
 	targets := discoverTargets("/nonexistent", raw)

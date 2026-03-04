@@ -101,11 +101,13 @@ func (m modelItem) FilterValue() string {
 }
 
 // buildTargetItems constructs the ordered, section-headed list items:
-// Agents → Sub-Agents → Other (commands).
+// Agents → Sub-Agents → Hidden Agents → Other (commands).
 func buildTargetItems(targets []config.Target) []list.Item {
-	var primary, subagent, commands []config.Target
+	var primary, subagent, hidden, commands []config.Target
 	for _, t := range targets {
 		switch {
+		case t.Kind == config.KindAgent && t.Hidden:
+			hidden = append(hidden, t)
 		case t.Kind == config.KindAgent && (t.Mode == "primary" || t.Mode == "all"):
 			primary = append(primary, t)
 		case t.Kind == config.KindAgent && t.Mode == "subagent":
@@ -125,6 +127,12 @@ func buildTargetItems(targets []config.Target) []list.Item {
 	if len(subagent) > 0 {
 		items = append(items, sectionItem{"Sub-Agents"})
 		for _, t := range subagent {
+			items = append(items, targetItem{target: t})
+		}
+	}
+	if len(hidden) > 0 {
+		items = append(items, sectionItem{"Hidden Agents"})
+		for _, t := range hidden {
 			items = append(items, targetItem{target: t})
 		}
 	}

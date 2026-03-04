@@ -34,6 +34,7 @@ type Target struct {
 	Model   string // current model preference, empty = none
 	BuiltIn bool
 	Locked  bool // true for built-in primary agents whose cycle order is fixed by OpenCode
+	Hidden  bool // true when frontmatter sets hidden: true
 }
 
 // Model represents an available model from a provider.
@@ -277,24 +278,28 @@ func discoverMarkdownAgents(dir string, raw []byte, seen map[string]bool) []Targ
 			continue
 		}
 
-		mode := parseFrontmatterField(filepath.Join(dir, e.Name()), "mode")
+		agentPath := filepath.Join(dir, e.Name())
+		mode := parseFrontmatterField(agentPath, "mode")
 		if mode == "" {
 			mode = "all"
 		}
+
+		hidden := parseFrontmatterField(agentPath, "hidden") == "true"
 
 		// Check if there's a model override in the JSON config
 		model := gjson.GetBytes(raw, "agent."+name+".model").String()
 
 		// Also check frontmatter for model
 		if model == "" {
-			model = parseFrontmatterField(filepath.Join(dir, e.Name()), "model")
+			model = parseFrontmatterField(agentPath, "model")
 		}
 
 		targets = append(targets, Target{
-			Name:  name,
-			Kind:  KindAgent,
-			Mode:  mode,
-			Model: model,
+			Name:   name,
+			Kind:   KindAgent,
+			Mode:   mode,
+			Model:  model,
+			Hidden: hidden,
 		})
 		seen[name] = true
 	}
