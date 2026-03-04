@@ -411,7 +411,7 @@ func (m Model) openRolePicker() (tea.Model, tea.Cmd) {
 				Height(m.formHeight()).
 				Value(&m.formRoleValue),
 		),
-	).WithHeight(m.formHeight())
+	).WithHeight(m.formHeight()).WithKeyMap(selectKeyMap())
 
 	m.view = viewForm
 	return m, m.form.Init()
@@ -448,7 +448,7 @@ func (m Model) openModelPicker() (tea.Model, tea.Cmd) {
 				Height(m.formHeight()).
 				Value(&m.formModelValue),
 		),
-	).WithHeight(m.formHeight())
+	).WithHeight(m.formHeight()).WithKeyMap(selectKeyMap())
 
 	m.view = viewForm
 	return m, m.form.Init()
@@ -492,6 +492,21 @@ func (m Model) saveRoutingCmd() tea.Cmd {
 		err := config.SaveRouting(routing)
 		return saveRoutingMsg{err: err}
 	}
+}
+
+// selectKeyMap returns a custom huh KeyMap that adds left/right arrow keys
+// as page-up/page-down for navigating long select lists.
+func selectKeyMap() *huh.KeyMap {
+	km := huh.NewDefaultKeyMap()
+	km.Select.HalfPageUp = key.NewBinding(
+		key.WithKeys("ctrl+u", "left"),
+		key.WithHelp("←/ctrl+u", "½ page up"),
+	)
+	km.Select.HalfPageDown = key.NewBinding(
+		key.WithKeys("ctrl+d", "right"),
+		key.WithHelp("→/ctrl+d", "½ page down"),
+	)
+	return km
 }
 
 // formHeight returns the available height for huh forms, accounting for
