@@ -1,6 +1,12 @@
 # omp — OpenCode Model Preferences
 
-A TUI for managing **model slots** in [OpenCode](https://github.com/anomalyco/opencode). Create named **slots**, assign a model to each slot, then assign agents/commands to slots. When you apply, only slots with a model mapped actually write to `opencode.json` — unmapped slots leave agents unchanged.
+A TUI for managing model routing in [OpenCode](https://github.com/anomalyco/opencode).
+
+You can route targets in two ways:
+- **Slot mapping**: assign target -> slot, then slot -> model
+- **Direct mapping**: assign target -> model directly (overrides slot mapping)
+
+When you apply, only targets with an effective mapping are written to `opencode.json`.
 
 ## Slots
 
@@ -54,11 +60,12 @@ export OPEN_CHAD_OMP_POPUP_SIZE="120x40"    # absolute cells
 
 ### Flow
 
-1. **Assignments view** (default) — Browse agents and commands. Each shows its current model and assigned slot.
-2. **Assign slot** — Press `s` on an agent to assign a slot (or clear it).
-3. **Slots view** — Press `tab` to switch to the slots view. Each slot shows its mapped model.
-4. **Map model** — Press `enter` on a slot to pick a model for it (or clear it).
-5. **Apply** — Press `a` in the assignments view to write models to `opencode.json`. Only targets with a slot assigned AND whose slot has a model mapped are affected.
+1. **Assignments view** (default) — Browse agents and commands. Each shows current model and active mapping.
+2. **Assign slot** — Press `s` to assign a slot (or clear slot assignment).
+3. **Set direct model** — Press `m` to assign a model directly to the selected target (or clear it).
+4. **Slots view** — Press `tab` to switch to slots. Manage slot->model mappings there.
+5. **Manage slots** — In Slots view: `enter` set slot model, `r` rename, `n` add, `x` remove.
+6. **Apply** — Press `a` in Assignments view to write effective mappings to `opencode.json`.
 
 ### Keybinds
 
@@ -67,7 +74,8 @@ export OPEN_CHAD_OMP_POPUP_SIZE="120x40"    # absolute cells
 | Key | Action |
 |-----|--------|
 | `s` | Assign slot to selected agent/command |
-| `a` | Apply slots to opencode.json |
+| `m` | Set direct model for selected agent/command |
+| `a` | Apply mappings to opencode.json |
 | `tab` | Switch to slots view |
 | `/` | Filter the list |
 | `q` / `ctrl+c` | Quit |
@@ -77,6 +85,9 @@ export OPEN_CHAD_OMP_POPUP_SIZE="120x40"    # absolute cells
 | Key | Action |
 |-----|--------|
 | `enter` | Set model for selected slot |
+| `r` | Rename selected slot |
+| `n` | Add a new slot |
+| `x` / `delete` / `backspace` | Remove selected slot |
 | `tab` | Switch to assignments view |
 | `esc` | Back to assignments view |
 | `q` / `ctrl+c` | Quit |
@@ -84,11 +95,11 @@ export OPEN_CHAD_OMP_POPUP_SIZE="120x40"    # absolute cells
 ### How slot-based routing works
 
 When you press `a` to apply:
-- For each target (agent/command), `omp` checks if it has a slot assigned
-- If yes, it looks up the model mapped to that slot
-- If the slot has a model, it writes that model to `opencode.json`
-- If the slot has no model (unmapped), the target keeps its existing model
-- Targets with no slot assigned are not touched at all
+- If target has a non-empty `target_models[target]`, that direct model is used
+- Otherwise, if target has `target_slots[target]` and that slot has a model, slot model is used
+- Otherwise, target is left unchanged
+
+Precedence is always: **direct target model > slot model > unchanged**.
 
 > **Note:** Apply only writes to agents and commands that already have an entry in `opencode.json`. It does not create new agent entries.
 
@@ -109,9 +120,15 @@ Slot configuration is stored in `~/.config/opencode/omp-slots.json` (separate fr
     "plan": "slot-1",
     "general": "slot-2",
     "explore": "slot-3"
+  },
+  "target_models": {
+    "general": "openai/gpt-5",
+    "deploy": "anthropic/claude-sonnet-4"
   }
 }
 ```
+
+`target_models` is optional. If present, it overrides slot routing per target.
 
 ### Migration from roles
 
