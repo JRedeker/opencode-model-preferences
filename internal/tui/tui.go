@@ -63,8 +63,10 @@ func (s sectionItem) FilterValue() string { return "" }
 
 // targetItem wraps a config.Target for the assignments list.
 type targetItem struct {
-	target   config.Target
-	slotName string // assigned slot display name, or "(none)"
+	target        config.Target
+	slotName      string // assigned slot display name, or "(none)"
+	directModel   string
+	mappingSource string // direct|slot|none
 }
 
 func (t targetItem) Title() string { return t.target.Name }
@@ -73,10 +75,13 @@ func (t targetItem) Description() string {
 	if model == "" {
 		model = "(no model)"
 	}
+	if t.mappingSource == "direct" {
+		return fmt.Sprintf("model: %s  mapping: direct (%s)", model, t.directModel)
+	}
 	return fmt.Sprintf("model: %s  slot: %s", model, t.slotName)
 }
 func (t targetItem) FilterValue() string {
-	return t.target.Name + " " + t.target.Model + " " + t.slotName
+	return t.target.Name + " " + t.target.Model + " " + t.slotName + " " + t.directModel
 }
 
 // slotItem wraps a config.Slot for the slots list.
@@ -126,7 +131,16 @@ func buildTargetItems(targets []config.Target, slots config.SlotsConfig) []list.
 				slotName = slotID // fallback to ID if name not found
 			}
 		}
-		item := targetItem{target: t, slotName: slotName}
+		directModel := ""
+		mappingSource := "none"
+		if dm, ok := slots.TargetModels[t.Name]; ok && dm != "" {
+			directModel = dm
+			mappingSource = "direct"
+		} else if slotName != "(none)" {
+			mappingSource = "slot"
+		}
+
+		item := targetItem{target: t, slotName: slotName, directModel: directModel, mappingSource: mappingSource}
 		if t.Kind == config.KindCommand {
 			commands = append(commands, item)
 		} else {
@@ -249,8 +263,9 @@ const (
 type pickerKind int
 
 const (
-	pickSlot  pickerKind = iota // picking a slot for a target
-	pickModel                   // picking a model for a slot
+	pickSlot        pickerKind = iota // picking a slot for a target
+	pickModel                         // picking a model for a slot
+	pickTargetModel                   // picking direct model for a target
 )
 
 // -- Messages ----------------------------------------------------------------
@@ -268,6 +283,12 @@ type modelPickDoneMsg struct {
 	slotID  string
 	model   string
 	cleared bool
+}
+
+type targetModelPickDoneMsg struct {
+	targetName string
+	model      string
+	cleared    bool
 }
 
 // -- Model -------------------------------------------------------------------
@@ -359,7 +380,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.status = fmt.Sprintf("Error applying: %v", msg.err)
 		} else {
-			m.status = "Slots applied to opencode.json"
+			m.status = "Mappings applied to opencode.json"
 		}
 		return m, nil
 
@@ -370,6 +391,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case slotPickDoneMsg:
+		if m.slots.TargetSlots == nil {
+			m.slots.TargetSlots = make(map[string]string)
+		}
 		if msg.cleared {
 			delete(m.slots.TargetSlots, msg.targetName)
 			m.status = fmt.Sprintf("Cleared slot for %s", msg.targetName)
@@ -403,6 +427,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.view = viewSlots
 		m.rebuildSlotList()
+		return m, m.saveSlotsCmd()
+
+	case targetModelPickDoneMsg:
+		if m.slots.TargetModels == nil {
+			m.slots.TargetModels = make(map[string]string)
+		}
+		if msg.cleared {
+			delete(m.slots.TargetModels, msg.targetName)
+			m.status = fmt.Sprintf("Cleared direct model for %s", msg.targetName)
+		} else {
+			m.slots.TargetModels[msg.targetName] = msg.model
+			m.status = fmt.Sprintf("Set %s direct model → %s", msg.targetName, msg.model)
+		}
+		m.view = viewAssignments
+		m.rebuildAssignmentList()
 		return m, m.saveSlotsCmd()
 
 	case tea.KeyMsg:
@@ -448,7 +487,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case key.Matches(msg, key.NewBinding(key.WithKeys("enter"))):
 				return m.handlePickerSelect()
 			case key.Matches(msg, key.NewBinding(key.WithKeys("esc"))):
-				if m.pickerKind == pickSlot {
+				if m.pickerKind == pickSlot || m.pickerKind == pickTargetModel {
 					m.view = viewAssignments
 				} else {
 					m.view = viewSlots
@@ -488,6 +527,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, key.NewBinding(key.WithKeys("s"))):
 			if m.view == viewAssignments {
 				return m.openSlotPicker()
+			}
+
+		case key.Matches(msg, key.NewBinding(key.WithKeys("m"))):
+			if m.view == viewAssignments {
+				return m.openTargetModelPicker()
 			}
 
 		case key.Matches(msg, key.NewBinding(key.WithKeys("enter"))):
@@ -607,6 +651,25 @@ func (m Model) openModelPicker() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m Model) openTargetModelPicker() (tea.Model, tea.Cmd) {
+	item, ok := m.assignmentList.SelectedItem().(targetItem)
+	if !ok {
+		return m, nil
+	}
+
+	items := buildModelPickItems(m.state.Models)
+	m.pickerList.SetItems(items)
+	m.pickerList.Title = fmt.Sprintf("Direct model for %s", item.target.Name)
+	m.pickerList.ResetFilter()
+	m.pickerList.Select(0)
+
+	m.pickerKind = pickTargetModel
+	m.pickerTargetName = item.target.Name
+	m.view = viewPicker
+	m.status = ""
+	return m, nil
+}
+
 func (m Model) openRenameSlot() (tea.Model, tea.Cmd) {
 	item, ok := m.slotList.SelectedItem().(slotItem)
 	if !ok {
@@ -636,6 +699,17 @@ func (m Model) handlePickerSelect() (tea.Model, tea.Cmd) {
 				return slotPickDoneMsg{targetName: targetName, cleared: true}
 			}
 			return slotPickDoneMsg{targetName: targetName, slotID: value}
+		}
+	}
+
+	if m.pickerKind == pickTargetModel {
+		targetName := m.pickerTargetName
+		value := item.value
+		return m, func() tea.Msg {
+			if value == "" {
+				return targetModelPickDoneMsg{targetName: targetName, cleared: true}
+			}
+			return targetModelPickDoneMsg{targetName: targetName, model: value}
 		}
 	}
 
@@ -750,7 +824,7 @@ func (m Model) View() string {
 		if m.status != "" {
 			content += "\n" + statusStyle.Render(m.status)
 		}
-		content += "\n" + faintStyle.Render("s: assign slot  a: apply slots  tab: slots view  q: quit")
+		content += "\n" + faintStyle.Render("s: assign slot  m: direct model  a: apply mappings  tab: slots view  q: quit")
 
 	case viewSlots:
 		content = m.slotList.View()

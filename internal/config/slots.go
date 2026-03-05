@@ -26,14 +26,16 @@ type Slot struct {
 	Model string `json:"model"` // model ID, empty = no assignment
 }
 
-// SlotsConfig holds the slot definitions and per-target slot assignments.
+// SlotsConfig holds the slot definitions and per-target model routing.
 //
 // Slots is the ordered list of user-defined slots (default: 4).
 // TargetSlots maps each target name to a slot ID. Targets without an entry
 // have no slot assignment and are not affected by ApplySlots.
+// TargetModels maps a target directly to a model ID and overrides slot mapping.
 type SlotsConfig struct {
-	Slots       []Slot            `json:"slots"`
-	TargetSlots map[string]string `json:"target_slots"`
+	Slots        []Slot            `json:"slots"`
+	TargetSlots  map[string]string `json:"target_slots"`
+	TargetModels map[string]string `json:"target_models,omitempty"`
 }
 
 // DefaultSlotsConfig returns a fresh SlotsConfig with 4 default slots and no
@@ -46,7 +48,8 @@ func DefaultSlotsConfig() SlotsConfig {
 			{ID: "slot-3", Name: "Slot 3"},
 			{ID: "slot-4", Name: "Slot 4"},
 		},
-		TargetSlots: make(map[string]string),
+		TargetSlots:  make(map[string]string),
+		TargetModels: make(map[string]string),
 	}
 }
 
@@ -61,8 +64,9 @@ func LoadSlots() (SlotsConfig, error) {
 	data, err := os.ReadFile(SlotsPath())
 	if os.IsNotExist(err) {
 		return SlotsConfig{
-			Slots:       []Slot{},
-			TargetSlots: make(map[string]string),
+			Slots:        []Slot{},
+			TargetSlots:  make(map[string]string),
+			TargetModels: make(map[string]string),
 		}, nil
 	}
 	if err != nil {
@@ -77,6 +81,9 @@ func LoadSlots() (SlotsConfig, error) {
 	}
 	if sc.TargetSlots == nil {
 		sc.TargetSlots = make(map[string]string)
+	}
+	if sc.TargetModels == nil {
+		sc.TargetModels = make(map[string]string)
 	}
 	return sc, nil
 }
@@ -210,8 +217,9 @@ func MigrateRoutingToSlots() (bool, error) {
 }
 
 // ApplySlots writes model preferences to opencode.json for all targets that
-// have a slot assigned AND whose slot has a model set. Targets without a slot
-// assignment, or whose slot has no model, are left unchanged.
+// have either a direct model assignment (TargetModels) or a slot assignment
+// with a mapped slot model. Direct target models override slot mapping.
+// Targets without any effective mapping are left unchanged.
 // Only writes to targets that already exist in opencode.json.
 func ApplySlots(sc SlotsConfig, targets []Target) error {
 	configPath := ConfigPath()
@@ -228,13 +236,20 @@ func ApplySlots(sc SlotsConfig, targets []Target) error {
 
 	updated := raw
 	for _, t := range targets {
-		slotID, hasSlot := sc.TargetSlots[t.Name]
-		if !hasSlot {
-			continue
-		}
-		model, hasModel := slotModels[slotID]
-		if !hasModel || model == "" {
-			continue
+		model := ""
+
+		if direct, ok := sc.TargetModels[t.Name]; ok && direct != "" {
+			model = direct
+		} else {
+			slotID, hasSlot := sc.TargetSlots[t.Name]
+			if !hasSlot {
+				continue
+			}
+			slotModel, hasModel := slotModels[slotID]
+			if !hasModel || slotModel == "" {
+				continue
+			}
+			model = slotModel
 		}
 
 		var jsonPath string

@@ -286,3 +286,39 @@ func TestView_SlotsView_ShowsRenameAddRemoveHints(t *testing.T) {
 		t.Fatalf("expected remove hint in slots view, got:\n%s", rendered)
 	}
 }
+
+func TestView_AssignmentsView_ShowsDirectModelHint(t *testing.T) {
+	state := &config.State{
+		Targets: []config.Target{{Name: "build", Kind: config.KindAgent}},
+	}
+	slots := config.SlotsConfig{Slots: []config.Slot{{ID: "slot-1", Name: "Slot 1"}}}
+	m := New(state, slots)
+
+	rendered := m.View()
+	if !strings.Contains(rendered, "m: direct model") {
+		t.Fatalf("expected direct model hint in assignments view, got:\n%s", rendered)
+	}
+}
+
+func TestBuildTargetItems_DirectModelShownInDescription(t *testing.T) {
+	targets := []config.Target{{Name: "build", Kind: config.KindAgent, Model: "anthropic/claude-opus-4"}}
+	slots := config.SlotsConfig{
+		Slots:        []config.Slot{{ID: "slot-1", Name: "Slot 1", Model: "anthropic/claude-sonnet-4"}},
+		TargetSlots:  map[string]string{"build": "slot-1"},
+		TargetModels: map[string]string{"build": "openai/gpt-5"},
+	}
+
+	items := buildTargetItems(targets, slots)
+	for _, item := range items {
+		ti, ok := item.(targetItem)
+		if !ok {
+			continue
+		}
+		desc := ti.Description()
+		if !strings.Contains(desc, "mapping: direct (openai/gpt-5)") {
+			t.Fatalf("expected direct mapping details in description, got: %s", desc)
+		}
+		return
+	}
+	t.Fatal("target item not found")
+}

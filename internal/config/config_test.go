@@ -740,6 +740,9 @@ func TestLoadSlots_FileNotExist(t *testing.T) {
 	if len(sc.TargetSlots) != 0 {
 		t.Errorf("expected empty TargetSlots, got %d", len(sc.TargetSlots))
 	}
+	if len(sc.TargetModels) != 0 {
+		t.Errorf("expected empty TargetModels, got %d", len(sc.TargetModels))
+	}
 }
 
 func TestLoadSlots_ExistingFile(t *testing.T) {
@@ -747,7 +750,8 @@ func TestLoadSlots_ExistingFile(t *testing.T) {
 	t.Setenv("OPENCODE_CONFIG_DIR", dir)
 	content := `{
 		"slots": [{"id":"slot-1","name":"Fast","model":"anthropic/claude-haiku-4"}],
-		"target_slots": {"build":"slot-1"}
+		"target_slots": {"build":"slot-1"},
+		"target_models": {"general":"openai/gpt-5"}
 	}`
 	os.WriteFile(filepath.Join(dir, "omp-slots.json"), []byte(content), 0644)
 
@@ -770,6 +774,9 @@ func TestLoadSlots_ExistingFile(t *testing.T) {
 	if sc.TargetSlots["build"] != "slot-1" {
 		t.Errorf("TargetSlots[build] = %q, want slot-1", sc.TargetSlots["build"])
 	}
+	if sc.TargetModels["general"] != "openai/gpt-5" {
+		t.Errorf("TargetModels[general] = %q, want openai/gpt-5", sc.TargetModels["general"])
+	}
 }
 
 func TestLoadSlots_NilMapsInitialized(t *testing.T) {
@@ -786,6 +793,9 @@ func TestLoadSlots_NilMapsInitialized(t *testing.T) {
 	}
 	if sc.TargetSlots == nil {
 		t.Error("TargetSlots should be initialized (not nil)")
+	}
+	if sc.TargetModels == nil {
+		t.Error("TargetModels should be initialized (not nil)")
 	}
 }
 
@@ -813,6 +823,9 @@ func TestSaveSlots_RoundTrip(t *testing.T) {
 			"build":   "slot-1",
 			"general": "slot-2",
 		},
+		TargetModels: map[string]string{
+			"deploy": "openai/gpt-5",
+		},
 	}
 	if err := SaveSlots(sc); err != nil {
 		t.Fatalf("SaveSlots() error: %v", err)
@@ -830,6 +843,9 @@ func TestSaveSlots_RoundTrip(t *testing.T) {
 	if loaded.TargetSlots["build"] != "slot-1" {
 		t.Errorf("TargetSlots[build] = %q, want slot-1", loaded.TargetSlots["build"])
 	}
+	if loaded.TargetModels["deploy"] != "openai/gpt-5" {
+		t.Errorf("TargetModels[deploy] = %q, want openai/gpt-5", loaded.TargetModels["deploy"])
+	}
 }
 
 func TestSaveSlots_AtomicWrite(t *testing.T) {
@@ -837,8 +853,9 @@ func TestSaveSlots_AtomicWrite(t *testing.T) {
 	t.Setenv("OPENCODE_CONFIG_DIR", dir)
 
 	sc := SlotsConfig{
-		Slots:       []Slot{{ID: "slot-1", Name: "S1", Model: "openai/gpt-5"}},
-		TargetSlots: map[string]string{},
+		Slots:        []Slot{{ID: "slot-1", Name: "S1", Model: "openai/gpt-5"}},
+		TargetSlots:  map[string]string{},
+		TargetModels: map[string]string{},
 	}
 	if err := SaveSlots(sc); err != nil {
 		t.Fatalf("SaveSlots() error: %v", err)
@@ -981,6 +998,64 @@ func TestApplySlots_EmptySlotModelSkipsTarget(t *testing.T) {
 	}
 }
 
+func TestApplySlots_DirectTargetModelOverridesSlot(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("OPENCODE_CONFIG_DIR", dir)
+
+	initial := `{"agent": {"build": {"model": "existing/model"}}}`
+	os.WriteFile(filepath.Join(dir, "opencode.json"), []byte(initial), 0644)
+
+	targets := []Target{{Name: "build", Kind: KindAgent}}
+	sc := SlotsConfig{
+		Slots: []Slot{{ID: "slot-1", Name: "S1", Model: "anthropic/claude-opus-4"}},
+		TargetSlots: map[string]string{
+			"build": "slot-1",
+		},
+		TargetModels: map[string]string{
+			"build": "openai/gpt-5",
+		},
+	}
+
+	if err := ApplySlots(sc, targets); err != nil {
+		t.Fatalf("ApplySlots() error: %v", err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(dir, "opencode.json"))
+	got := gjson.Get(string(data), "agent.build.model").String()
+	if got != "openai/gpt-5" {
+		t.Errorf("build model = %q, want openai/gpt-5 (direct model should override slot)", got)
+	}
+}
+
+func TestApplySlots_EmptyDirectModelFallsBackToSlot(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("OPENCODE_CONFIG_DIR", dir)
+
+	initial := `{"agent": {"build": {"model": "existing/model"}}}`
+	os.WriteFile(filepath.Join(dir, "opencode.json"), []byte(initial), 0644)
+
+	targets := []Target{{Name: "build", Kind: KindAgent}}
+	sc := SlotsConfig{
+		Slots: []Slot{{ID: "slot-1", Name: "S1", Model: "anthropic/claude-opus-4"}},
+		TargetSlots: map[string]string{
+			"build": "slot-1",
+		},
+		TargetModels: map[string]string{
+			"build": "",
+		},
+	}
+
+	if err := ApplySlots(sc, targets); err != nil {
+		t.Fatalf("ApplySlots() error: %v", err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(dir, "opencode.json"))
+	got := gjson.Get(string(data), "agent.build.model").String()
+	if got != "anthropic/claude-opus-4" {
+		t.Errorf("build model = %q, want anthropic/claude-opus-4 (fallback to slot model)", got)
+	}
+}
+
 func TestDefaultSlotsConfig_FourSlots(t *testing.T) {
 	sc := DefaultSlotsConfig()
 	if len(sc.Slots) != 4 {
@@ -998,6 +1073,9 @@ func TestDefaultSlotsConfig_FourSlots(t *testing.T) {
 		if !ids[id] {
 			t.Errorf("missing slot %q in DefaultSlotsConfig", id)
 		}
+	}
+	if sc.TargetModels == nil {
+		t.Error("TargetModels should be initialized (not nil)")
 	}
 }
 
