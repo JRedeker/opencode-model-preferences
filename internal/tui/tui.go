@@ -14,11 +14,13 @@ package tui
 import (
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 
 	"github.com/anomalyco/opencode-model-preferences/internal/config"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
@@ -240,6 +242,7 @@ const (
 	viewAssignments viewState = iota // agent/command list with slot assignments
 	viewSlots                        // slot→model list
 	viewPicker                       // picker list (slot or model selection)
+	viewRename                       // text input to rename slot
 )
 
 // pickerKind tracks what the picker is selecting.
@@ -287,6 +290,9 @@ type Model struct {
 	status string
 	width  int
 	height int
+
+	renameInput  textinput.Model
+	renameSlotID string
 }
 
 // New creates the initial TUI model.
@@ -313,6 +319,11 @@ func New(state *config.State, slots config.SlotsConfig) Model {
 	pl.SetShowStatusBar(true)
 	pl.SetFilteringEnabled(true)
 
+	ri := textinput.New()
+	ri.Placeholder = "Slot name"
+	ri.CharLimit = 80
+	ri.Width = 50
+
 	return Model{
 		state:          state,
 		slots:          slots,
@@ -320,6 +331,7 @@ func New(state *config.State, slots config.SlotsConfig) Model {
 		assignmentList: al,
 		slotList:       sl,
 		pickerList:     pl,
+		renameInput:    ri,
 	}
 }
 
@@ -340,6 +352,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		slotExtra := 9
 		m.slotList.SetSize(msg.Width-h, msg.Height-v-slotExtra)
 		m.pickerList.SetSize(msg.Width-h, msg.Height-v)
+		m.renameInput.Width = msg.Width - h - 6
 		return m, nil
 
 	case applyResultMsg:
@@ -393,6 +406,39 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.saveSlotsCmd()
 
 	case tea.KeyMsg:
+		if m.view == viewRename {
+			switch {
+			case key.Matches(msg, key.NewBinding(key.WithKeys("enter"))):
+				name := strings.TrimSpace(m.renameInput.Value())
+				if name == "" {
+					m.status = "Slot name cannot be empty"
+					return m, nil
+				}
+				if renameSlot(&m.slots, m.renameSlotID, name) {
+					m.status = fmt.Sprintf("Renamed %s", name)
+					m.view = viewSlots
+					m.rebuildSlotList()
+					m.rebuildAssignmentList()
+					m.renameInput.Reset()
+					return m, m.saveSlotsCmd()
+				}
+				m.status = "Could not rename slot"
+				m.view = viewSlots
+				m.renameInput.Reset()
+				return m, nil
+			case key.Matches(msg, key.NewBinding(key.WithKeys("esc"))):
+				m.view = viewSlots
+				m.renameInput.Reset()
+				m.status = ""
+				return m, nil
+			case key.Matches(msg, key.NewBinding(key.WithKeys("q", "ctrl+c"))):
+				return m, tea.Quit
+			}
+			var cmd tea.Cmd
+			m.renameInput, cmd = m.renameInput.Update(msg)
+			return m, cmd
+		}
+
 		// Picker view: enter selects, esc goes back
 		if m.view == viewPicker {
 			if m.pickerList.FilterState() == list.Filtering {
@@ -449,6 +495,49 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m.openModelPicker()
 			}
 
+		case key.Matches(msg, key.NewBinding(key.WithKeys("r"))):
+			if m.view == viewSlots {
+				return m.openRenameSlot()
+			}
+
+		case key.Matches(msg, key.NewBinding(key.WithKeys("n"))):
+			if m.view == viewSlots {
+				slot := addSlot(&m.slots)
+				m.status = fmt.Sprintf("Added %s", slot.Name)
+				m.rebuildSlotList()
+				m.rebuildAssignmentList()
+				m.slotList.Select(len(m.slots.Slots) - 1)
+				return m, m.saveSlotsCmd()
+			}
+
+		case key.Matches(msg, key.NewBinding(key.WithKeys("x", "backspace", "delete"))):
+			if m.view == viewSlots {
+				if len(m.slots.Slots) <= 1 {
+					m.status = "Cannot remove the last slot"
+					return m, nil
+				}
+				item, ok := m.slotList.SelectedItem().(slotItem)
+				if !ok {
+					return m, nil
+				}
+				removed, cleared := removeSlot(&m.slots, item.slot.ID)
+				if !removed {
+					m.status = "Could not remove slot"
+					return m, nil
+				}
+				m.status = fmt.Sprintf("Removed %s (cleared %d assignment(s))", item.slot.Name, cleared)
+				oldIndex := m.slotList.Index()
+				m.rebuildSlotList()
+				m.rebuildAssignmentList()
+				if len(m.slots.Slots) > 0 {
+					if oldIndex >= len(m.slots.Slots) {
+						oldIndex = len(m.slots.Slots) - 1
+					}
+					m.slotList.Select(oldIndex)
+				}
+				return m, m.saveSlotsCmd()
+			}
+
 		case key.Matches(msg, key.NewBinding(key.WithKeys("a"))):
 			if m.view == viewAssignments {
 				return m.applySlots()
@@ -465,6 +554,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.slotList, cmd = m.slotList.Update(msg)
 	case viewPicker:
 		m.pickerList, cmd = m.pickerList.Update(msg)
+	case viewRename:
+		m.renameInput, cmd = m.renameInput.Update(msg)
 	}
 	return m, cmd
 }
@@ -514,6 +605,21 @@ func (m Model) openModelPicker() (tea.Model, tea.Cmd) {
 	m.view = viewPicker
 	m.status = ""
 	return m, nil
+}
+
+func (m Model) openRenameSlot() (tea.Model, tea.Cmd) {
+	item, ok := m.slotList.SelectedItem().(slotItem)
+	if !ok {
+		return m, nil
+	}
+
+	m.renameSlotID = item.slot.ID
+	m.renameInput.SetValue(item.slot.Name)
+	m.renameInput.Focus()
+	m.renameInput.CursorEnd()
+	m.view = viewRename
+	m.status = ""
+	return m, textinput.Blink
 }
 
 func (m Model) handlePickerSelect() (tea.Model, tea.Cmd) {
@@ -571,6 +677,68 @@ func (m *Model) rebuildSlotList() {
 	m.slotList.SetItems(items)
 }
 
+func nextSlotID(slots []config.Slot) string {
+	maxN := 0
+	for _, s := range slots {
+		if !strings.HasPrefix(s.ID, "slot-") {
+			continue
+		}
+		n, err := strconv.Atoi(strings.TrimPrefix(s.ID, "slot-"))
+		if err != nil {
+			continue
+		}
+		if n > maxN {
+			maxN = n
+		}
+	}
+	next := maxN + 1
+	return fmt.Sprintf("slot-%d", next)
+}
+
+func addSlot(sc *config.SlotsConfig) config.Slot {
+	id := nextSlotID(sc.Slots)
+	n := strings.TrimPrefix(id, "slot-")
+	s := config.Slot{ID: id, Name: fmt.Sprintf("Slot %s", n)}
+	sc.Slots = append(sc.Slots, s)
+	if sc.TargetSlots == nil {
+		sc.TargetSlots = make(map[string]string)
+	}
+	return s
+}
+
+func removeSlot(sc *config.SlotsConfig, slotID string) (bool, int) {
+	idx := -1
+	for i, s := range sc.Slots {
+		if s.ID == slotID {
+			idx = i
+			break
+		}
+	}
+	if idx == -1 {
+		return false, 0
+	}
+
+	sc.Slots = append(sc.Slots[:idx], sc.Slots[idx+1:]...)
+	cleared := 0
+	for target, assigned := range sc.TargetSlots {
+		if assigned == slotID {
+			delete(sc.TargetSlots, target)
+			cleared++
+		}
+	}
+	return true, cleared
+}
+
+func renameSlot(sc *config.SlotsConfig, slotID, name string) bool {
+	for i, s := range sc.Slots {
+		if s.ID == slotID {
+			sc.Slots[i].Name = name
+			return true
+		}
+	}
+	return false
+}
+
 // -- View --------------------------------------------------------------------
 
 func (m Model) View() string {
@@ -598,11 +766,16 @@ func (m Model) View() string {
 			summary = append(summary, fmt.Sprintf("  %s → %s", slotStyle.Render(s.Name), model))
 		}
 		content += "\n" + strings.Join(summary, "\n")
-		content += "\n" + faintStyle.Render("enter: set model  tab: assignments view  esc: back  q: quit")
+		content += "\n" + faintStyle.Render("enter: set model  r: rename slot  n: add slot  x: remove slot  tab: assignments view  esc: back  q: quit")
 
 	case viewPicker:
 		content = m.pickerList.View()
 		content += "\n" + faintStyle.Render("enter: select  /: filter  esc: cancel")
+
+	case viewRename:
+		content = titleStyle.Render("Rename Slot") + "\n\n"
+		content += m.renameInput.View()
+		content += "\n\n" + faintStyle.Render("enter: save  esc: cancel")
 	}
 
 	return appStyle.Render(content)

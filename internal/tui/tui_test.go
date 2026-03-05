@@ -183,3 +183,106 @@ func TestBuildSlotItems_UnmappedShowsPlaceholder(t *testing.T) {
 		}
 	}
 }
+
+func TestNextSlotID_UsesMaxSuffixPlusOne(t *testing.T) {
+	slots := []config.Slot{
+		{ID: "slot-1", Name: "Slot 1"},
+		{ID: "slot-4", Name: "Slot 4"},
+		{ID: "custom", Name: "Custom"},
+	}
+
+	got := nextSlotID(slots)
+	if got != "slot-5" {
+		t.Fatalf("nextSlotID() = %q, want slot-5", got)
+	}
+}
+
+func TestAddSlot_AppendsNewSlotWithDefaultName(t *testing.T) {
+	sc := config.SlotsConfig{
+		Slots: []config.Slot{
+			{ID: "slot-1", Name: "Slot 1"},
+			{ID: "slot-2", Name: "Slot 2"},
+		},
+		TargetSlots: map[string]string{},
+	}
+
+	added := addSlot(&sc)
+
+	if added.ID != "slot-3" {
+		t.Fatalf("added.ID = %q, want slot-3", added.ID)
+	}
+	if added.Name != "Slot 3" {
+		t.Fatalf("added.Name = %q, want Slot 3", added.Name)
+	}
+	if len(sc.Slots) != 3 {
+		t.Fatalf("len(sc.Slots) = %d, want 3", len(sc.Slots))
+	}
+}
+
+func TestRemoveSlot_RemovesAssignmentsToDeletedSlot(t *testing.T) {
+	sc := config.SlotsConfig{
+		Slots: []config.Slot{
+			{ID: "slot-1", Name: "Slot 1"},
+			{ID: "slot-2", Name: "Slot 2"},
+		},
+		TargetSlots: map[string]string{
+			"build":   "slot-1",
+			"general": "slot-1",
+			"deploy":  "slot-2",
+		},
+	}
+
+	removed, cleared := removeSlot(&sc, "slot-1")
+	if !removed {
+		t.Fatal("expected removed=true")
+	}
+	if cleared != 2 {
+		t.Fatalf("cleared = %d, want 2", cleared)
+	}
+	if len(sc.Slots) != 1 || sc.Slots[0].ID != "slot-2" {
+		t.Fatalf("remaining slots = %#v, want only slot-2", sc.Slots)
+	}
+	if _, ok := sc.TargetSlots["build"]; ok {
+		t.Fatal("build assignment should be removed")
+	}
+	if _, ok := sc.TargetSlots["general"]; ok {
+		t.Fatal("general assignment should be removed")
+	}
+	if got := sc.TargetSlots["deploy"]; got != "slot-2" {
+		t.Fatalf("deploy assignment = %q, want slot-2", got)
+	}
+}
+
+func TestRenameSlot_UpdatesMatchingSlotName(t *testing.T) {
+	sc := config.SlotsConfig{
+		Slots: []config.Slot{{ID: "slot-1", Name: "Slot 1"}},
+	}
+
+	ok := renameSlot(&sc, "slot-1", "Fast Lane")
+	if !ok {
+		t.Fatal("expected rename to succeed")
+	}
+	if sc.Slots[0].Name != "Fast Lane" {
+		t.Fatalf("slot name = %q, want Fast Lane", sc.Slots[0].Name)
+	}
+}
+
+func TestView_SlotsView_ShowsRenameAddRemoveHints(t *testing.T) {
+	state := &config.State{}
+	slots := config.SlotsConfig{
+		Slots: []config.Slot{{ID: "slot-1", Name: "Slot 1"}},
+	}
+	m := New(state, slots)
+	m.view = viewSlots
+
+	rendered := m.View()
+	if !strings.Contains(rendered, "r: rename slot") {
+		t.Fatalf("expected rename hint in slots view, got:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "n: add slot") {
+		t.Fatalf("expected add hint in slots view, got:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "x: remove slot") {
+		t.Fatalf("expected remove hint in slots view, got:\n%s", rendered)
+	}
+}
