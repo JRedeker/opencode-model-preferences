@@ -2,6 +2,7 @@ package config
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -714,158 +715,151 @@ You are a security auditor.
 	}
 }
 
-// -- Routing config tests ----------------------------------------------------
+// -- SlotsConfig tests -------------------------------------------------------
 
-func TestRoutingPath_RespectsOPENCODE_CONFIG_DIR(t *testing.T) {
+func TestSlotsPath_RespectsOPENCODE_CONFIG_DIR(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("OPENCODE_CONFIG_DIR", dir)
-	got := RoutingPath()
-	want := filepath.Join(dir, "omp-routing.json")
+	got := SlotsPath()
+	want := filepath.Join(dir, "omp-slots.json")
 	if got != want {
-		t.Errorf("RoutingPath() = %q, want %q", got, want)
+		t.Errorf("SlotsPath() = %q, want %q", got, want)
 	}
 }
 
-func TestLoadRouting_FileNotExist(t *testing.T) {
+func TestLoadSlots_FileNotExist(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("OPENCODE_CONFIG_DIR", dir)
-	rc, err := LoadRouting()
+	sc, err := LoadSlots()
 	if err != nil {
-		t.Fatalf("LoadRouting() error on missing file: %v", err)
+		t.Fatalf("LoadSlots() error on missing file: %v", err)
 	}
-	if len(rc.RoleModels) != 0 {
-		t.Errorf("expected empty RoleModels, got %d", len(rc.RoleModels))
+	if len(sc.Slots) != 0 {
+		t.Errorf("expected empty Slots, got %d", len(sc.Slots))
 	}
-	if len(rc.TargetRoles) != 0 {
-		t.Errorf("expected empty TargetRoles, got %d", len(rc.TargetRoles))
+	if len(sc.TargetSlots) != 0 {
+		t.Errorf("expected empty TargetSlots, got %d", len(sc.TargetSlots))
 	}
 }
 
-func TestLoadRouting_ExistingFile(t *testing.T) {
+func TestLoadSlots_ExistingFile(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("OPENCODE_CONFIG_DIR", dir)
-	content := `{"role_models":{"brain":"anthropic/claude-opus-4"},"target_roles":{"build":"brain"}}`
-	os.WriteFile(filepath.Join(dir, "omp-routing.json"), []byte(content), 0644)
+	content := `{
+		"slots": [{"id":"slot-1","name":"Fast","model":"anthropic/claude-haiku-4"}],
+		"target_slots": {"build":"slot-1"}
+	}`
+	os.WriteFile(filepath.Join(dir, "omp-slots.json"), []byte(content), 0644)
 
-	rc, err := LoadRouting()
+	sc, err := LoadSlots()
 	if err != nil {
-		t.Fatalf("LoadRouting() error: %v", err)
+		t.Fatalf("LoadSlots() error: %v", err)
 	}
-	if rc.RoleModels[RoleBrain] != "anthropic/claude-opus-4" {
-		t.Errorf("RoleModels[brain] = %q, want anthropic/claude-opus-4", rc.RoleModels[RoleBrain])
+	if len(sc.Slots) != 1 {
+		t.Fatalf("expected 1 slot, got %d", len(sc.Slots))
 	}
-	if rc.TargetRoles["build"] != RoleBrain {
-		t.Errorf("TargetRoles[build] = %q, want brain", rc.TargetRoles["build"])
+	if sc.Slots[0].ID != "slot-1" {
+		t.Errorf("slot ID = %q, want slot-1", sc.Slots[0].ID)
+	}
+	if sc.Slots[0].Name != "Fast" {
+		t.Errorf("slot Name = %q, want Fast", sc.Slots[0].Name)
+	}
+	if sc.Slots[0].Model != "anthropic/claude-haiku-4" {
+		t.Errorf("slot Model = %q, want anthropic/claude-haiku-4", sc.Slots[0].Model)
+	}
+	if sc.TargetSlots["build"] != "slot-1" {
+		t.Errorf("TargetSlots[build] = %q, want slot-1", sc.TargetSlots["build"])
 	}
 }
 
-func TestLoadRouting_NilMapsInitialized(t *testing.T) {
+func TestLoadSlots_NilMapsInitialized(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("OPENCODE_CONFIG_DIR", dir)
-	// JSON with no fields — maps should still be initialized
-	os.WriteFile(filepath.Join(dir, "omp-routing.json"), []byte(`{}`), 0644)
+	os.WriteFile(filepath.Join(dir, "omp-slots.json"), []byte(`{}`), 0644)
 
-	rc, err := LoadRouting()
+	sc, err := LoadSlots()
 	if err != nil {
-		t.Fatalf("LoadRouting() error: %v", err)
+		t.Fatalf("LoadSlots() error: %v", err)
 	}
-	if rc.RoleModels == nil {
-		t.Error("RoleModels should be initialized, got nil")
+	if sc.Slots == nil {
+		t.Error("Slots should be initialized (not nil)")
 	}
-	if rc.TargetRoles == nil {
-		t.Error("TargetRoles should be initialized, got nil")
-	}
-}
-
-func TestSaveRouting_CreatesFile(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("OPENCODE_CONFIG_DIR", dir)
-	rc := RoutingConfig{
-		RoleModels:  map[UserRole]string{RoleBrain: "anthropic/claude-opus-4"},
-		TargetRoles: map[string]UserRole{"build": RoleBrain},
-	}
-	if err := SaveRouting(rc); err != nil {
-		t.Fatalf("SaveRouting() error: %v", err)
-	}
-	data, err := os.ReadFile(filepath.Join(dir, "omp-routing.json"))
-	if err != nil {
-		t.Fatalf("reading saved file: %v", err)
-	}
-	if !strings.Contains(string(data), "brain") {
-		t.Errorf("saved file should contain role name, got: %s", data)
+	if sc.TargetSlots == nil {
+		t.Error("TargetSlots should be initialized (not nil)")
 	}
 }
 
-func TestSaveRouting_RoundTrip(t *testing.T) {
+func TestLoadSlots_CorruptJSON(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("OPENCODE_CONFIG_DIR", dir)
+	os.WriteFile(filepath.Join(dir, "omp-slots.json"), []byte(`{not valid`), 0644)
+
+	_, err := LoadSlots()
+	if err == nil {
+		t.Error("LoadSlots() should return error for corrupt JSON")
+	}
+}
+
+func TestSaveSlots_RoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("OPENCODE_CONFIG_DIR", dir)
 
-	rc := RoutingConfig{
-		RoleModels: map[UserRole]string{
-			RoleBrain:   "anthropic/claude-opus-4",
-			RoleBuilder: "anthropic/claude-sonnet-4",
+	sc := SlotsConfig{
+		Slots: []Slot{
+			{ID: "slot-1", Name: "Brain", Model: "anthropic/claude-opus-4"},
+			{ID: "slot-2", Name: "Worker", Model: "anthropic/claude-haiku-4"},
 		},
-		TargetRoles: map[string]UserRole{
-			"build":   RoleBrain,
-			"plan":    RoleBrain,
-			"general": RoleBuilder,
+		TargetSlots: map[string]string{
+			"build":   "slot-1",
+			"general": "slot-2",
 		},
 	}
-	if err := SaveRouting(rc); err != nil {
-		t.Fatalf("SaveRouting() error: %v", err)
+	if err := SaveSlots(sc); err != nil {
+		t.Fatalf("SaveSlots() error: %v", err)
 	}
-	loaded, err := LoadRouting()
+	loaded, err := LoadSlots()
 	if err != nil {
-		t.Fatalf("LoadRouting() error: %v", err)
+		t.Fatalf("LoadSlots() error: %v", err)
 	}
-	if loaded.RoleModels[RoleBrain] != "anthropic/claude-opus-4" {
-		t.Errorf("round-trip RoleModels[brain] = %q", loaded.RoleModels[RoleBrain])
+	if len(loaded.Slots) != 2 {
+		t.Fatalf("expected 2 slots, got %d", len(loaded.Slots))
 	}
-	if loaded.RoleModels[RoleBuilder] != "anthropic/claude-sonnet-4" {
-		t.Errorf("round-trip RoleModels[builder] = %q", loaded.RoleModels[RoleBuilder])
+	if loaded.Slots[0].Model != "anthropic/claude-opus-4" {
+		t.Errorf("slot-1 model = %q, want anthropic/claude-opus-4", loaded.Slots[0].Model)
 	}
-	if loaded.TargetRoles["build"] != RoleBrain {
-		t.Errorf("round-trip TargetRoles[build] = %q", loaded.TargetRoles["build"])
-	}
-	if loaded.TargetRoles["general"] != RoleBuilder {
-		t.Errorf("round-trip TargetRoles[general] = %q", loaded.TargetRoles["general"])
+	if loaded.TargetSlots["build"] != "slot-1" {
+		t.Errorf("TargetSlots[build] = %q, want slot-1", loaded.TargetSlots["build"])
 	}
 }
 
-// TestSaveRouting_AtomicWrite verifies that SaveRouting leaves no temp files
-// behind after a successful write (atomic temp+rename pattern).
-func TestSaveRouting_AtomicWrite(t *testing.T) {
+func TestSaveSlots_AtomicWrite(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("OPENCODE_CONFIG_DIR", dir)
 
-	rc := RoutingConfig{
-		RoleModels:  map[UserRole]string{RoleBrain: "openai/gpt-5"},
-		TargetRoles: map[string]UserRole{},
+	sc := SlotsConfig{
+		Slots:       []Slot{{ID: "slot-1", Name: "S1", Model: "openai/gpt-5"}},
+		TargetSlots: map[string]string{},
 	}
-	if err := SaveRouting(rc); err != nil {
-		t.Fatalf("SaveRouting() error: %v", err)
+	if err := SaveSlots(sc); err != nil {
+		t.Fatalf("SaveSlots() error: %v", err)
 	}
 
 	entries, _ := os.ReadDir(dir)
 	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), ".omp-routing-") && strings.HasSuffix(e.Name(), ".tmp") {
-			t.Errorf("temp file left behind after SaveRouting: %s", e.Name())
+		if strings.HasPrefix(e.Name(), ".omp-") && strings.Contains(e.Name(), ".tmp") {
+			t.Errorf("temp file left behind after SaveSlots: %s", e.Name())
 		}
 	}
 }
 
-// -- ApplyRouting tests ------------------------------------------------------
-
-func TestApplyRouting(t *testing.T) {
+func TestApplySlots_WritesModelToTargets(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("OPENCODE_CONFIG_DIR", dir)
 
 	initial := `{
   "agent": {
     "build": {"mode": "primary"},
-    "plan": {"mode": "primary"},
-    "general": {"mode": "subagent"},
-    "explore": {"mode": "subagent"}
+    "general": {"mode": "subagent"}
   },
   "command": {
     "deploy": {}
@@ -874,211 +868,311 @@ func TestApplyRouting(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "opencode.json"), []byte(initial), 0644)
 
 	targets := []Target{
-		{Name: "build", Kind: KindAgent, Mode: "primary"},
-		{Name: "plan", Kind: KindAgent, Mode: "primary"},
-		{Name: "general", Kind: KindAgent, Mode: "subagent"},
-		{Name: "explore", Kind: KindAgent, Mode: "subagent"},
+		{Name: "build", Kind: KindAgent},
+		{Name: "general", Kind: KindAgent},
 		{Name: "deploy", Kind: KindCommand},
 	}
-	rc := RoutingConfig{
-		RoleModels: map[UserRole]string{
-			RoleBrain:   "anthropic/claude-opus-4",
-			RoleBuilder: "anthropic/claude-sonnet-4",
+	sc := SlotsConfig{
+		Slots: []Slot{
+			{ID: "slot-1", Name: "Fast", Model: "anthropic/claude-opus-4"},
+			{ID: "slot-2", Name: "Cheap", Model: "anthropic/claude-haiku-4"},
 		},
-		TargetRoles: map[string]UserRole{
-			"build":   RoleBrain,
-			"plan":    RoleBrain,
-			"general": RoleBuilder,
-			// explore has no role — should be left unchanged
-			"deploy": RoleBrain,
+		TargetSlots: map[string]string{
+			"build":   "slot-1",
+			"general": "slot-2",
+			"deploy":  "slot-1",
 		},
 	}
 
-	if err := ApplyRouting(rc, targets); err != nil {
-		t.Fatalf("ApplyRouting() error: %v", err)
+	if err := ApplySlots(sc, targets); err != nil {
+		t.Fatalf("ApplySlots() error: %v", err)
 	}
 
 	data, _ := os.ReadFile(filepath.Join(dir, "opencode.json"))
 	raw := string(data)
 
-	// Agents with brain role get opus
-	for _, name := range []string{"build", "plan"} {
-		got := gjson.Get(raw, "agent."+name+".model").String()
-		if got != "anthropic/claude-opus-4" {
-			t.Errorf("agent %q model = %q, want anthropic/claude-opus-4", name, got)
-		}
+	if gjson.Get(raw, "agent.build.model").String() != "anthropic/claude-opus-4" {
+		t.Errorf("build model = %q, want anthropic/claude-opus-4", gjson.Get(raw, "agent.build.model").String())
 	}
-	// general has builder role → sonnet
-	got := gjson.Get(raw, "agent.general.model").String()
-	if got != "anthropic/claude-sonnet-4" {
-		t.Errorf("agent general model = %q, want anthropic/claude-sonnet-4", got)
+	if gjson.Get(raw, "agent.general.model").String() != "anthropic/claude-haiku-4" {
+		t.Errorf("general model = %q, want anthropic/claude-haiku-4", gjson.Get(raw, "agent.general.model").String())
 	}
-	// explore has no role → no model field written
-	if gjson.Get(raw, "agent.explore.model").Exists() {
-		t.Error("explore should not have model set (no role assigned)")
-	}
-	// command deploy has brain role → opus
-	got = gjson.Get(raw, "command.deploy.model").String()
-	if got != "anthropic/claude-opus-4" {
-		t.Errorf("command deploy model = %q, want anthropic/claude-opus-4", got)
+	if gjson.Get(raw, "command.deploy.model").String() != "anthropic/claude-opus-4" {
+		t.Errorf("deploy model = %q, want anthropic/claude-opus-4", gjson.Get(raw, "command.deploy.model").String())
 	}
 }
 
-func TestApplyRouting_UnmappedRoleSkipped(t *testing.T) {
+func TestApplySlots_SkipsTargetNotInConfig(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("OPENCODE_CONFIG_DIR", dir)
 
-	initial := `{
-  "agent": {
-    "build": {"mode": "primary", "model": "existing/model"}
-  }
-}`
+	initial := `{"agent": {"build": {}}}`
 	os.WriteFile(filepath.Join(dir, "opencode.json"), []byte(initial), 0644)
 
 	targets := []Target{
-		{Name: "build", Kind: KindAgent, Mode: "primary"},
+		{Name: "build", Kind: KindAgent},
+		{Name: "plan", Kind: KindAgent}, // not in config
 	}
-	// build has a role, but that role has no model mapped
-	rc := RoutingConfig{
-		RoleModels:  map[UserRole]string{},
-		TargetRoles: map[string]UserRole{"build": RoleFixer},
+	sc := SlotsConfig{
+		Slots:       []Slot{{ID: "slot-1", Name: "S1", Model: "anthropic/claude-opus-4"}},
+		TargetSlots: map[string]string{"build": "slot-1", "plan": "slot-1"},
 	}
 
-	if err := ApplyRouting(rc, targets); err != nil {
-		t.Fatalf("ApplyRouting() error: %v", err)
+	if err := ApplySlots(sc, targets); err != nil {
+		t.Fatalf("ApplySlots() error: %v", err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(dir, "opencode.json"))
+	raw := string(data)
+
+	if gjson.Get(raw, "agent.build.model").String() != "anthropic/claude-opus-4" {
+		t.Errorf("build model should be set")
+	}
+	if gjson.Get(raw, "agent.plan").Exists() {
+		t.Errorf("plan should not be added to config (not present)")
+	}
+}
+
+func TestApplySlots_NoSlotAssignmentSkipsTarget(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("OPENCODE_CONFIG_DIR", dir)
+
+	initial := `{"agent": {"build": {"model": "existing/model"}}}`
+	os.WriteFile(filepath.Join(dir, "opencode.json"), []byte(initial), 0644)
+
+	targets := []Target{{Name: "build", Kind: KindAgent}}
+	sc := SlotsConfig{
+		Slots:       []Slot{{ID: "slot-1", Name: "S1", Model: "anthropic/claude-opus-4"}},
+		TargetSlots: map[string]string{}, // build has no slot assignment
+	}
+
+	if err := ApplySlots(sc, targets); err != nil {
+		t.Fatalf("ApplySlots() error: %v", err)
 	}
 
 	data, _ := os.ReadFile(filepath.Join(dir, "opencode.json"))
 	got := gjson.Get(string(data), "agent.build.model").String()
 	if got != "existing/model" {
-		t.Errorf("build model = %q, want existing/model (unmapped role should not change it)", got)
+		t.Errorf("build model = %q, want existing/model (no slot assignment should not change it)", got)
 	}
 }
 
-func TestApplyRouting_ClearAll(t *testing.T) {
+func TestApplySlots_EmptySlotModelSkipsTarget(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("OPENCODE_CONFIG_DIR", dir)
 
-	initial := `{
-  "agent": {
-    "build": {"model": "anthropic/claude-opus-4"},
-    "general": {"model": "anthropic/claude-haiku-4"}
-  }
-}`
+	initial := `{"agent": {"build": {"model": "existing/model"}}}`
 	os.WriteFile(filepath.Join(dir, "opencode.json"), []byte(initial), 0644)
 
-	targets := []Target{
-		{Name: "build", Kind: KindAgent, Mode: "primary"},
-		{Name: "general", Kind: KindAgent, Mode: "subagent"},
+	targets := []Target{{Name: "build", Kind: KindAgent}}
+	sc := SlotsConfig{
+		Slots:       []Slot{{ID: "slot-1", Name: "S1", Model: ""}}, // empty model
+		TargetSlots: map[string]string{"build": "slot-1"},
 	}
 
-	if err := ClearAllModelAssignments(targets); err != nil {
-		t.Fatalf("ClearAllModelAssignments() error: %v", err)
+	if err := ApplySlots(sc, targets); err != nil {
+		t.Fatalf("ApplySlots() error: %v", err)
 	}
 
 	data, _ := os.ReadFile(filepath.Join(dir, "opencode.json"))
-	raw := string(data)
-
-	if gjson.Get(raw, "agent.build.model").Exists() {
-		t.Error("build model should be cleared")
-	}
-	if gjson.Get(raw, "agent.general.model").Exists() {
-		t.Error("general model should be cleared")
+	got := gjson.Get(string(data), "agent.build.model").String()
+	if got != "existing/model" {
+		t.Errorf("build model = %q, want existing/model (empty slot model should not overwrite)", got)
 	}
 }
 
-func TestIsValidUserRole(t *testing.T) {
-	for _, r := range AllUserRoles() {
-		if !IsValidUserRole(r) {
-			t.Errorf("IsValidUserRole(%q) = false, want true", r)
+func TestDefaultSlotsConfig_FourSlots(t *testing.T) {
+	sc := DefaultSlotsConfig()
+	if len(sc.Slots) != 4 {
+		t.Fatalf("DefaultSlotsConfig() should return 4 slots, got %d", len(sc.Slots))
+	}
+	ids := make(map[string]bool)
+	for _, s := range sc.Slots {
+		ids[s.ID] = true
+		if s.Name == "" {
+			t.Errorf("slot %q has empty Name", s.ID)
 		}
 	}
-	if IsValidUserRole("bogus") {
-		t.Error("IsValidUserRole(bogus) = true, want false")
-	}
-}
-
-func TestRoleForTarget(t *testing.T) {
-	cases := []struct {
-		name   string
-		target Target
-		want   Role
-	}{
-		{"primary agent is orchestrator", Target{Kind: KindAgent, Mode: "primary"}, RoleOrchestrator},
-		{"subagent is worker", Target{Kind: KindAgent, Mode: "subagent"}, RoleWorker},
-		{"all mode is orchestrator", Target{Kind: KindAgent, Mode: "all"}, RoleOrchestrator},
-		{"empty mode is orchestrator", Target{Kind: KindAgent, Mode: ""}, RoleOrchestrator},
-		{"command is orchestrator", Target{Kind: KindCommand}, RoleOrchestrator},
-		{"command with arbitrary mode is still orchestrator", Target{Kind: KindCommand, Mode: "subagent"}, RoleOrchestrator},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := RoleForTarget(tc.target)
-			if got != tc.want {
-				t.Errorf("RoleForTarget(%+v) = %q, want %q", tc.target, got, tc.want)
-			}
-		})
-	}
-}
-
-func TestBuiltInAgentsLocked(t *testing.T) {
-	raw := []byte(`{}`)
-	targets := discoverTargets("/nonexistent", raw)
-
-	for _, tgt := range targets {
-		switch tgt.Name {
-		case "build", "plan":
-			if !tgt.Locked {
-				t.Errorf("agent %q should be Locked=true", tgt.Name)
-			}
-		case "general", "explore":
-			if tgt.Locked {
-				t.Errorf("agent %q should be Locked=false", tgt.Name)
-			}
+	for i := 1; i <= 4; i++ {
+		id := fmt.Sprintf("slot-%d", i)
+		if !ids[id] {
+			t.Errorf("missing slot %q in DefaultSlotsConfig", id)
 		}
 	}
 }
 
-// -- Role taxonomy tests -----------------------------------------------------
+// -- MigrateRoutingToSlots tests ---------------------------------------------
 
-func TestUserRoles_AllFiveDeclared(t *testing.T) {
-	want := []UserRole{RoleBrain, RoleTasker, RoleBuilder, RoleLibrarian, RoleFixer}
-	got := AllUserRoles()
-	if len(got) != len(want) {
-		t.Fatalf("AllUserRoles() returned %d roles, want %d: %v", len(got), len(want), got)
-	}
-	byRole := make(map[UserRole]bool)
-	for _, r := range got {
-		byRole[r] = true
-	}
-	for _, r := range want {
-		if !byRole[r] {
-			t.Errorf("missing role %q in AllUserRoles()", r)
+func TestMigrateRoutingToSlots_BasicMigration(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("OPENCODE_CONFIG_DIR", dir)
+
+	// Old routing config with brain→opus, builder→sonnet; build→brain, general→builder
+	routing := `{
+		"role_models": {
+			"brain": "anthropic/claude-opus-4",
+			"builder": "anthropic/claude-sonnet-4"
+		},
+		"target_roles": {
+			"build": "brain",
+			"general": "builder"
 		}
+	}`
+	os.WriteFile(filepath.Join(dir, "omp-routing.json"), []byte(routing), 0644)
+
+	migrated, err := MigrateRoutingToSlots()
+	if err != nil {
+		t.Fatalf("MigrateRoutingToSlots() error: %v", err)
+	}
+	if !migrated {
+		t.Fatal("MigrateRoutingToSlots() should return true when migration occurred")
+	}
+
+	// omp-slots.json should now exist
+	sc, err := LoadSlots()
+	if err != nil {
+		t.Fatalf("LoadSlots() after migration error: %v", err)
+	}
+
+	// brain → slot-1, builder → slot-3
+	slotByID := make(map[string]Slot)
+	for _, s := range sc.Slots {
+		slotByID[s.ID] = s
+	}
+
+	if slotByID["slot-1"].Model != "anthropic/claude-opus-4" {
+		t.Errorf("slot-1 model = %q, want anthropic/claude-opus-4 (brain→slot-1)", slotByID["slot-1"].Model)
+	}
+	if slotByID["slot-3"].Model != "anthropic/claude-sonnet-4" {
+		t.Errorf("slot-3 model = %q, want anthropic/claude-sonnet-4 (builder→slot-3)", slotByID["slot-3"].Model)
+	}
+
+	// build→brain→slot-1, general→builder→slot-3
+	if sc.TargetSlots["build"] != "slot-1" {
+		t.Errorf("TargetSlots[build] = %q, want slot-1", sc.TargetSlots["build"])
+	}
+	if sc.TargetSlots["general"] != "slot-3" {
+		t.Errorf("TargetSlots[general] = %q, want slot-3", sc.TargetSlots["general"])
 	}
 }
 
-func TestUserRoles_DescriptionsNonEmpty(t *testing.T) {
-	for _, r := range AllUserRoles() {
-		if UserRoleDescription(r) == "" {
-			t.Errorf("UserRoleDescription(%q) is empty", r)
-		}
+func TestMigrateRoutingToSlots_NoRoutingFile(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("OPENCODE_CONFIG_DIR", dir)
+	// No omp-routing.json — should return false, no error
+
+	migrated, err := MigrateRoutingToSlots()
+	if err != nil {
+		t.Fatalf("MigrateRoutingToSlots() error when no routing file: %v", err)
+	}
+	if migrated {
+		t.Error("MigrateRoutingToSlots() should return false when no routing file exists")
 	}
 }
 
-func TestUserRoles_DoNotAffectRoleForTarget(t *testing.T) {
-	// Declaring user roles must not change how RoleForTarget classifies targets.
-	cases := []struct {
-		target Target
-		want   Role
-	}{
-		{Target{Kind: KindAgent, Mode: "primary"}, RoleOrchestrator},
-		{Target{Kind: KindAgent, Mode: "subagent"}, RoleWorker},
-		{Target{Kind: KindCommand}, RoleOrchestrator},
+func TestMigrateRoutingToSlots_SlotsAlreadyExist(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("OPENCODE_CONFIG_DIR", dir)
+
+	// Both files exist — migration should be skipped
+	os.WriteFile(filepath.Join(dir, "omp-routing.json"), []byte(`{"role_models":{},"target_roles":{}}`), 0644)
+	os.WriteFile(filepath.Join(dir, "omp-slots.json"), []byte(`{"slots":[],"target_slots":{}}`), 0644)
+
+	migrated, err := MigrateRoutingToSlots()
+	if err != nil {
+		t.Fatalf("MigrateRoutingToSlots() error: %v", err)
 	}
-	for _, tc := range cases {
-		if got := RoleForTarget(tc.target); got != tc.want {
-			t.Errorf("RoleForTarget(%+v) = %q, want %q (user roles must not affect routing)", tc.target, got, tc.want)
-		}
+	if migrated {
+		t.Error("MigrateRoutingToSlots() should return false when omp-slots.json already exists")
+	}
+}
+
+func TestMigrateRoutingToSlots_AllRolesMapped(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("OPENCODE_CONFIG_DIR", dir)
+
+	routing := `{
+		"role_models": {
+			"brain":     "m/brain",
+			"tasker":    "m/tasker",
+			"builder":   "m/builder",
+			"librarian": "m/librarian",
+			"fixer":     "m/fixer"
+		},
+		"target_roles": {}
+	}`
+	os.WriteFile(filepath.Join(dir, "omp-routing.json"), []byte(routing), 0644)
+
+	_, err := MigrateRoutingToSlots()
+	if err != nil {
+		t.Fatalf("MigrateRoutingToSlots() error: %v", err)
+	}
+
+	sc, _ := LoadSlots()
+	slotByID := make(map[string]Slot)
+	for _, s := range sc.Slots {
+		slotByID[s.ID] = s
+	}
+
+	// brain→slot-1, tasker→slot-2, builder→slot-3, librarian→slot-4, fixer→slot-4
+	if slotByID["slot-1"].Model != "m/brain" {
+		t.Errorf("slot-1 = %q, want m/brain", slotByID["slot-1"].Model)
+	}
+	if slotByID["slot-2"].Model != "m/tasker" {
+		t.Errorf("slot-2 = %q, want m/tasker", slotByID["slot-2"].Model)
+	}
+	if slotByID["slot-3"].Model != "m/builder" {
+		t.Errorf("slot-3 = %q, want m/builder", slotByID["slot-3"].Model)
+	}
+	// librarian and fixer both map to slot-4; fixer wins because it comes
+	// last in migrationRoleOrder (deterministic — no map iteration ambiguity)
+	if slotByID["slot-4"].Model != "m/fixer" {
+		t.Errorf("slot-4 = %q, want m/fixer (last in migrationRoleOrder wins)", slotByID["slot-4"].Model)
+	}
+}
+
+// -- Migration edge case tests -----------------------------------------------
+
+func TestMigrateRoutingToSlots_CorruptRoutingFile(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("OPENCODE_CONFIG_DIR", dir)
+
+	// Corrupt JSON — migration should fail gracefully
+	os.WriteFile(filepath.Join(dir, "omp-routing.json"), []byte(`{not valid json`), 0644)
+
+	migrated, err := MigrateRoutingToSlots()
+	if err == nil {
+		t.Error("MigrateRoutingToSlots() should return error for corrupt routing file")
+	}
+	if migrated {
+		t.Error("MigrateRoutingToSlots() should return false on error")
+	}
+	// omp-slots.json should NOT be created
+	if _, statErr := os.Stat(filepath.Join(dir, "omp-slots.json")); statErr == nil {
+		t.Error("omp-slots.json should not be created when migration fails")
+	}
+}
+
+func TestMigrateRoutingToSlots_RenamesRoutingFileAfterSuccess(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("OPENCODE_CONFIG_DIR", dir)
+
+	routing := `{"role_models":{"brain":"anthropic/claude-opus-4"},"target_roles":{"build":"brain"}}`
+	os.WriteFile(filepath.Join(dir, "omp-routing.json"), []byte(routing), 0644)
+
+	migrated, err := MigrateRoutingToSlots()
+	if err != nil {
+		t.Fatalf("MigrateRoutingToSlots() error: %v", err)
+	}
+	if !migrated {
+		t.Fatal("expected migration to occur")
+	}
+
+	// omp-routing.json should be renamed to omp-routing.json.migrated
+	if _, statErr := os.Stat(filepath.Join(dir, "omp-routing.json")); statErr == nil {
+		t.Error("omp-routing.json should be renamed after successful migration")
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, "omp-routing.json.migrated")); statErr != nil {
+		t.Errorf("omp-routing.json.migrated should exist after migration: %v", statErr)
 	}
 }

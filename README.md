@@ -1,20 +1,12 @@
 # omp — OpenCode Model Preferences
 
-A TUI for managing **model routing** in [OpenCode](https://github.com/anomalyco/opencode). Assign **roles** to agents/commands, then map each role to a model. When you apply routing, only roles with a model mapped actually write to `opencode.json` — unmapped roles leave agents unchanged.
+A TUI for managing **model slots** in [OpenCode](https://github.com/anomalyco/opencode). Create named **slots**, assign a model to each slot, then assign agents/commands to slots. When you apply, only slots with a model mapped actually write to `opencode.json` — unmapped slots leave agents unchanged.
 
-## Roles
+## Slots
 
-`omp` uses five named roles as the vocabulary for model assignment:
+`omp` uses user-defined named slots for model assignment. By default, 4 slots are created (`Slot 1` through `Slot 4`), but you can rename them to match your workflow (e.g. "Brain", "Worker", "Fast", "Cheap").
 
-| Role | Purpose |
-|------|---------|
-| `brain` | Orchestration, planning, and reviewing |
-| `tasker` | Purely agentic operations and tool calling |
-| `builder` | Coding |
-| `librarian` | Fact-checking and research |
-| `fixer` | Expertise and problem solving |
-
-Roles are purely for model mapping — they carry no context or system prompt.
+Slots are purely for model mapping — they carry no context or system prompt.
 
 ## Install
 
@@ -62,63 +54,70 @@ export OPEN_CHAD_OMP_POPUP_SIZE="120x40"    # absolute cells
 
 ### Flow
 
-1. **Agents view** (default) — Browse agents and commands. Each shows its current model and assigned role.
-2. **Assign role** — Press `r` on an agent to assign one of the five roles (or clear it).
-3. **Roles view** — Press `tab` to switch to the roles view. Each role shows its mapped model.
-4. **Map model** — Press `enter` on a role to pick a model for it (or clear it).
-5. **Apply** — Press `a` in the agents view to write models to `opencode.json`. Only targets with a role assigned AND whose role has a model mapped are affected.
+1. **Assignments view** (default) — Browse agents and commands. Each shows its current model and assigned slot.
+2. **Assign slot** — Press `s` on an agent to assign a slot (or clear it).
+3. **Slots view** — Press `tab` to switch to the slots view. Each slot shows its mapped model.
+4. **Map model** — Press `enter` on a slot to pick a model for it (or clear it).
+5. **Apply** — Press `a` in the assignments view to write models to `opencode.json`. Only targets with a slot assigned AND whose slot has a model mapped are affected.
 
 ### Keybinds
 
-**Agents view:**
+**Assignments view:**
 
 | Key | Action |
 |-----|--------|
-| `r` | Assign role to selected agent/command |
-| `a` | Apply routing to opencode.json |
-| `tab` | Switch to roles view |
+| `s` | Assign slot to selected agent/command |
+| `a` | Apply slots to opencode.json |
+| `tab` | Switch to slots view |
 | `/` | Filter the list |
 | `q` / `ctrl+c` | Quit |
 
-**Roles view:**
+**Slots view:**
 
 | Key | Action |
 |-----|--------|
-| `enter` | Set model for selected role |
-| `tab` | Switch to agents view |
-| `esc` | Back to agents view |
+| `enter` | Set model for selected slot |
+| `tab` | Switch to assignments view |
+| `esc` | Back to assignments view |
 | `q` / `ctrl+c` | Quit |
 
-### How routing works
+### How slot-based routing works
 
 When you press `a` to apply:
-- For each target (agent/command), `omp` checks if it has a role assigned
-- If yes, it looks up the model mapped to that role
-- If the role has a model, it writes that model to `opencode.json`
-- If the role has no model (unmapped), the target keeps its existing model
-- Targets with no role assigned are not touched at all
+- For each target (agent/command), `omp` checks if it has a slot assigned
+- If yes, it looks up the model mapped to that slot
+- If the slot has a model, it writes that model to `opencode.json`
+- If the slot has no model (unmapped), the target keeps its existing model
+- Targets with no slot assigned are not touched at all
 
 > **Note:** Apply only writes to agents and commands that already have an entry in `opencode.json`. It does not create new agent entries.
 
-## Routing config format
+## Slots config format
 
-Routing is stored in `~/.config/opencode/omp-routing.json` (separate from `opencode.json`, which does not accept unknown keys):
+Slot configuration is stored in `~/.config/opencode/omp-slots.json` (separate from `opencode.json`, which does not accept unknown keys):
 
 ```json
 {
-  "role_models": {
-    "brain": "anthropic/claude-opus-4",
-    "builder": "anthropic/claude-sonnet-4",
-    "tasker": "openai/gpt-4o"
-  },
-  "target_roles": {
-    "build": "brain",
-    "plan": "brain",
-    "general": "builder",
-    "explore": "tasker"
+  "slots": [
+    {"id": "slot-1", "name": "Brain", "model": "anthropic/claude-opus-4"},
+    {"id": "slot-2", "name": "Worker", "model": "anthropic/claude-sonnet-4"},
+    {"id": "slot-3", "name": "Fast", "model": "openai/gpt-4o"},
+    {"id": "slot-4", "name": "Cheap", "model": ""}
+  ],
+  "target_slots": {
+    "build": "slot-1",
+    "plan": "slot-1",
+    "general": "slot-2",
+    "explore": "slot-3"
   }
 }
 ```
+
+### Migration from roles
+
+If you previously used the role-based system (`omp-routing.json`), `omp` automatically migrates to slots on first launch:
+- `brain` → Slot 1, `tasker` → Slot 2, `builder` → Slot 3, `librarian`/`fixer` → Slot 4
+- The old `omp-routing.json` is renamed to `omp-routing.json.migrated`
 
 ## How it works
 

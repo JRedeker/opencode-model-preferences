@@ -1,14 +1,14 @@
-// Package tui implements the Bubbletea TUI for model routing management.
+// Package tui implements the Bubbletea TUI for slot-based model management.
 //
 // Three views, all using bubbles/list for consistent UX:
-//   - Agents view: list of agents/commands with current model and assigned role.
-//     Press 'r' to assign a role, 'a' to apply routing to opencode.json.
-//   - Roles view: list of 5 roles with their mapped model.
-//     Press 'enter' to pick a model for a role.
-//   - Picker view: full list.Model for selecting a role or model, with filtering.
+//   - Assignments view: list of agents/commands with current model and assigned slot.
+//     Press 's' to assign a slot, 'a' to apply slots to opencode.json.
+//   - Slots view: list of user-defined slots with their mapped model.
+//     Press 'enter' to pick a model for a slot, 'r' to rename a slot.
+//   - Picker view: full list.Model for selecting a slot or model, with filtering.
 //
-// Roles are purely for model mapping — they carry no context or system prompt.
-// If a role has no model mapped, targets assigned to it keep their existing model.
+// Slots are purely for model mapping — they carry no context or system prompt.
+// If a slot has no model mapped, targets assigned to it keep their existing model.
 package tui
 
 import (
@@ -43,7 +43,7 @@ var (
 			Bold(true).
 			PaddingTop(1)
 
-	roleStyle = lipgloss.NewStyle().
+	slotStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#CBA6F7")).
 			Bold(true)
 
@@ -59,10 +59,10 @@ func (s sectionItem) Title() string       { return s.label }
 func (s sectionItem) Description() string { return "" }
 func (s sectionItem) FilterValue() string { return "" }
 
-// targetItem wraps a config.Target for the agents list.
+// targetItem wraps a config.Target for the assignments list.
 type targetItem struct {
-	target config.Target
-	role   string // assigned role label, or "(none)"
+	target   config.Target
+	slotName string // assigned slot display name, or "(none)"
 }
 
 func (t targetItem) Title() string { return t.target.Name }
@@ -71,24 +71,28 @@ func (t targetItem) Description() string {
 	if model == "" {
 		model = "(no model)"
 	}
-	return fmt.Sprintf("model: %s  role: %s", model, t.role)
+	return fmt.Sprintf("model: %s  slot: %s", model, t.slotName)
 }
 func (t targetItem) FilterValue() string {
-	return t.target.Name + " " + t.target.Model + " " + t.role
+	return t.target.Name + " " + t.target.Model + " " + t.slotName
 }
 
-// roleItem wraps a UserRole for the roles list.
-type roleItem struct {
-	role  config.UserRole
-	model string // mapped model, or "(unmapped)"
-	desc  string
+// slotItem wraps a config.Slot for the slots list.
+type slotItem struct {
+	slot config.Slot
 }
 
-func (r roleItem) Title() string       { return string(r.role) }
-func (r roleItem) Description() string { return fmt.Sprintf("%s  →  %s", r.desc, r.model) }
-func (r roleItem) FilterValue() string { return string(r.role) + " " + r.model }
+func (s slotItem) Title() string { return s.slot.Name }
+func (s slotItem) Description() string {
+	model := s.slot.Model
+	if model == "" {
+		model = "(unmapped)"
+	}
+	return fmt.Sprintf("%s  →  %s", s.slot.ID, model)
+}
+func (s slotItem) FilterValue() string { return s.slot.Name + " " + s.slot.Model + " " + s.slot.ID }
 
-// pickItem is a selectable option in a picker list (role or model).
+// pickItem is a selectable option in a picker list (slot or model).
 type pickItem struct {
 	label string
 	value string // empty string = "clear" option
@@ -100,17 +104,27 @@ func (p pickItem) FilterValue() string { return p.label }
 
 // -- Item builders -----------------------------------------------------------
 
-func buildTargetItems(targets []config.Target, routing config.RoutingConfig) []list.Item {
+func buildTargetItems(targets []config.Target, slots config.SlotsConfig) []list.Item {
+	// Build slot ID → name lookup.
+	slotNames := make(map[string]string, len(slots.Slots))
+	for _, s := range slots.Slots {
+		slotNames[s.ID] = s.Name
+	}
+
 	var agents, commands []list.Item
 	for _, t := range targets {
 		if t.Hidden {
 			continue
 		}
-		roleName := "(none)"
-		if r, ok := routing.TargetRoles[t.Name]; ok {
-			roleName = string(r)
+		slotName := "(none)"
+		if slotID, ok := slots.TargetSlots[t.Name]; ok {
+			if name, ok := slotNames[slotID]; ok {
+				slotName = name
+			} else {
+				slotName = slotID // fallback to ID if name not found
+			}
 		}
-		item := targetItem{target: t, role: roleName}
+		item := targetItem{target: t, slotName: slotName}
 		if t.Kind == config.KindCommand {
 			commands = append(commands, item)
 		} else {
@@ -129,31 +143,24 @@ func buildTargetItems(targets []config.Target, routing config.RoutingConfig) []l
 	return items
 }
 
-func buildRoleItems(routing config.RoutingConfig) []list.Item {
+func buildSlotItems(slots config.SlotsConfig) []list.Item {
 	var items []list.Item
-	for _, r := range config.AllUserRoles() {
-		model := "(unmapped)"
-		if m, ok := routing.RoleModels[r]; ok && m != "" {
-			model = m
-		}
-		items = append(items, roleItem{
-			role:  r,
-			model: model,
-			desc:  config.UserRoleDescription(r),
-		})
+	for _, s := range slots.Slots {
+		items = append(items, slotItem{slot: s})
 	}
 	return items
 }
 
-func buildRolePickItems() []list.Item {
+func buildSlotPickItems(slots config.SlotsConfig) []list.Item {
 	items := []list.Item{
-		pickItem{label: "(none — clear role)", value: ""},
+		pickItem{label: "(none — clear slot)", value: ""},
 	}
-	for _, r := range config.AllUserRoles() {
-		items = append(items, pickItem{
-			label: fmt.Sprintf("%s — %s", r, config.UserRoleDescription(r)),
-			value: string(r),
-		})
+	for _, s := range slots.Slots {
+		label := s.Name
+		if s.Model != "" {
+			label = fmt.Sprintf("%s — %s", s.Name, s.Model)
+		}
+		items = append(items, pickItem{label: label, value: s.ID})
 	}
 	return items
 }
@@ -230,32 +237,32 @@ func (d pickDelegate) Render(w io.Writer, m list.Model, index int, item list.Ite
 type viewState int
 
 const (
-	viewAgents viewState = iota // agent/command list
-	viewRoles                   // role→model list
-	viewPicker                  // picker list (role or model selection)
+	viewAssignments viewState = iota // agent/command list with slot assignments
+	viewSlots                        // slot→model list
+	viewPicker                       // picker list (slot or model selection)
 )
 
 // pickerKind tracks what the picker is selecting.
 type pickerKind int
 
 const (
-	pickRole  pickerKind = iota // picking a role for a target
-	pickModel                   // picking a model for a role
+	pickSlot  pickerKind = iota // picking a slot for a target
+	pickModel                   // picking a model for a slot
 )
 
 // -- Messages ----------------------------------------------------------------
 
 type applyResultMsg struct{ err error }
-type saveRoutingMsg struct{ err error }
+type saveSlotsMsg struct{ err error }
 
-type rolePickDoneMsg struct {
+type slotPickDoneMsg struct {
 	targetName string
-	role       config.UserRole
+	slotID     string
 	cleared    bool
 }
 
 type modelPickDoneMsg struct {
-	role    config.UserRole
+	slotID  string
 	model   string
 	cleared bool
 }
@@ -264,18 +271,18 @@ type modelPickDoneMsg struct {
 
 // Model is the top-level Bubbletea model.
 type Model struct {
-	state   *config.State
-	routing config.RoutingConfig
-	view    viewState
+	state *config.State
+	slots config.SlotsConfig
+	view  viewState
 
-	agentList  list.Model
-	roleList   list.Model
-	pickerList list.Model
+	assignmentList list.Model
+	slotList       list.Model
+	pickerList     list.Model
 
 	// picker context
 	pickerKind       pickerKind
-	pickerTargetName string          // which target (for role picker)
-	pickerRole       config.UserRole // which role (for model picker)
+	pickerTargetName string // which target (for slot picker)
+	pickerSlotID     string // which slot ID (for model picker)
 
 	status string
 	width  int
@@ -283,22 +290,22 @@ type Model struct {
 }
 
 // New creates the initial TUI model.
-func New(state *config.State, routing config.RoutingConfig) Model {
+func New(state *config.State, slots config.SlotsConfig) Model {
 	delegate := newDelegate()
 
-	agentItems := buildTargetItems(state.Targets, routing)
-	al := list.New(agentItems, delegate, 0, 0)
+	assignmentItems := buildTargetItems(state.Targets, slots)
+	al := list.New(assignmentItems, delegate, 0, 0)
 	al.Title = "Agents & Commands"
 	al.Styles.Title = titleStyle
 	al.SetShowStatusBar(true)
 	al.SetFilteringEnabled(true)
 
-	roleItems := buildRoleItems(routing)
-	rl := list.New(roleItems, delegate, 0, 0)
-	rl.Title = "Role → Model Mapping"
-	rl.Styles.Title = titleStyle
-	rl.SetShowStatusBar(false)
-	rl.SetFilteringEnabled(false)
+	slotItems := buildSlotItems(slots)
+	sl := list.New(slotItems, delegate, 0, 0)
+	sl.Title = "Slots → Models"
+	sl.Styles.Title = titleStyle
+	sl.SetShowStatusBar(false)
+	sl.SetFilteringEnabled(false)
 
 	// Picker starts empty; populated when opened
 	pl := list.New(nil, pickDelegate{}, 0, 0)
@@ -307,12 +314,12 @@ func New(state *config.State, routing config.RoutingConfig) Model {
 	pl.SetFilteringEnabled(true)
 
 	return Model{
-		state:      state,
-		routing:    routing,
-		view:       viewAgents,
-		agentList:  al,
-		roleList:   rl,
-		pickerList: pl,
+		state:          state,
+		slots:          slots,
+		view:           viewAssignments,
+		assignmentList: al,
+		slotList:       sl,
+		pickerList:     pl,
 	}
 }
 
@@ -328,10 +335,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		h, v := appStyle.GetFrameSize()
-		m.agentList.SetSize(msg.Width-h, msg.Height-v)
-		// Role list needs less height: 5 summary lines + help + status + padding
-		roleExtra := 9
-		m.roleList.SetSize(msg.Width-h, msg.Height-v-roleExtra)
+		m.assignmentList.SetSize(msg.Width-h, msg.Height-v)
+		// Slot list needs less height: slot summary lines + help + status + padding
+		slotExtra := 9
+		m.slotList.SetSize(msg.Width-h, msg.Height-v-slotExtra)
 		m.pickerList.SetSize(msg.Width-h, msg.Height-v)
 		return m, nil
 
@@ -339,39 +346,51 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.status = fmt.Sprintf("Error applying: %v", msg.err)
 		} else {
-			m.status = "Routing applied to opencode.json"
+			m.status = "Slots applied to opencode.json"
 		}
 		return m, nil
 
-	case saveRoutingMsg:
+	case saveSlotsMsg:
 		if msg.err != nil {
 			m.status = fmt.Sprintf("Error saving: %v", msg.err)
 		}
 		return m, nil
 
-	case rolePickDoneMsg:
+	case slotPickDoneMsg:
 		if msg.cleared {
-			delete(m.routing.TargetRoles, msg.targetName)
-			m.status = fmt.Sprintf("Cleared role for %s", msg.targetName)
+			delete(m.slots.TargetSlots, msg.targetName)
+			m.status = fmt.Sprintf("Cleared slot for %s", msg.targetName)
 		} else {
-			m.routing.TargetRoles[msg.targetName] = msg.role
-			m.status = fmt.Sprintf("Set %s → %s", msg.targetName, msg.role)
+			m.slots.TargetSlots[msg.targetName] = msg.slotID
+			slotName := msg.slotID
+			for _, s := range m.slots.Slots {
+				if s.ID == msg.slotID {
+					slotName = s.Name
+					break
+				}
+			}
+			m.status = fmt.Sprintf("Set %s → %s", msg.targetName, slotName)
 		}
-		m.view = viewAgents
-		m.rebuildAgentList()
-		return m, m.saveRoutingCmd()
+		m.view = viewAssignments
+		m.rebuildAssignmentList()
+		return m, m.saveSlotsCmd()
 
 	case modelPickDoneMsg:
-		if msg.cleared {
-			delete(m.routing.RoleModels, msg.role)
-			m.status = fmt.Sprintf("Cleared model for %s", msg.role)
-		} else {
-			m.routing.RoleModels[msg.role] = msg.model
-			m.status = fmt.Sprintf("Set %s → %s", msg.role, msg.model)
+		for i, s := range m.slots.Slots {
+			if s.ID == msg.slotID {
+				if msg.cleared {
+					m.slots.Slots[i].Model = ""
+					m.status = fmt.Sprintf("Cleared model for %s", s.Name)
+				} else {
+					m.slots.Slots[i].Model = msg.model
+					m.status = fmt.Sprintf("Set %s → %s", s.Name, msg.model)
+				}
+				break
+			}
 		}
-		m.view = viewRoles
-		m.rebuildRoleList()
-		return m, m.saveRoutingCmd()
+		m.view = viewSlots
+		m.rebuildSlotList()
+		return m, m.saveSlotsCmd()
 
 	case tea.KeyMsg:
 		// Picker view: enter selects, esc goes back
@@ -383,10 +402,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case key.Matches(msg, key.NewBinding(key.WithKeys("enter"))):
 				return m.handlePickerSelect()
 			case key.Matches(msg, key.NewBinding(key.WithKeys("esc"))):
-				if m.pickerKind == pickRole {
-					m.view = viewAgents
+				if m.pickerKind == pickSlot {
+					m.view = viewAssignments
 				} else {
-					m.view = viewRoles
+					m.view = viewSlots
 				}
 				m.status = ""
 				return m, nil
@@ -405,34 +424,34 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 
 		case key.Matches(msg, key.NewBinding(key.WithKeys("esc"))):
-			if m.view == viewRoles {
-				m.view = viewAgents
+			if m.view == viewSlots {
+				m.view = viewAssignments
 				return m, nil
 			}
 			return m, tea.Quit
 
 		case key.Matches(msg, key.NewBinding(key.WithKeys("tab"))):
-			if m.view == viewAgents {
-				m.view = viewRoles
-			} else if m.view == viewRoles {
-				m.view = viewAgents
+			if m.view == viewAssignments {
+				m.view = viewSlots
+			} else if m.view == viewSlots {
+				m.view = viewAssignments
 			}
 			m.status = ""
 			return m, nil
 
-		case key.Matches(msg, key.NewBinding(key.WithKeys("r"))):
-			if m.view == viewAgents {
-				return m.openRolePicker()
+		case key.Matches(msg, key.NewBinding(key.WithKeys("s"))):
+			if m.view == viewAssignments {
+				return m.openSlotPicker()
 			}
 
 		case key.Matches(msg, key.NewBinding(key.WithKeys("enter"))):
-			if m.view == viewRoles {
+			if m.view == viewSlots {
 				return m.openModelPicker()
 			}
 
 		case key.Matches(msg, key.NewBinding(key.WithKeys("a"))):
-			if m.view == viewAgents {
-				return m.applyRouting()
+			if m.view == viewAssignments {
+				return m.applySlots()
 			}
 		}
 	}
@@ -440,10 +459,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Delegate to active view
 	var cmd tea.Cmd
 	switch m.view {
-	case viewAgents:
-		m.agentList, cmd = m.agentList.Update(msg)
-	case viewRoles:
-		m.roleList, cmd = m.roleList.Update(msg)
+	case viewAssignments:
+		m.assignmentList, cmd = m.assignmentList.Update(msg)
+	case viewSlots:
+		m.slotList, cmd = m.slotList.Update(msg)
 	case viewPicker:
 		m.pickerList, cmd = m.pickerList.Update(msg)
 	}
@@ -451,47 +470,47 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) activeList() *list.Model {
-	if m.view == viewRoles {
-		return &m.roleList
+	if m.view == viewSlots {
+		return &m.slotList
 	}
-	return &m.agentList
+	return &m.assignmentList
 }
 
-// openRolePicker opens a list picker to assign a role to the selected agent.
-func (m Model) openRolePicker() (tea.Model, tea.Cmd) {
-	item, ok := m.agentList.SelectedItem().(targetItem)
+// openSlotPicker opens a list picker to assign a slot to the selected target.
+func (m Model) openSlotPicker() (tea.Model, tea.Cmd) {
+	item, ok := m.assignmentList.SelectedItem().(targetItem)
 	if !ok {
 		return m, nil
 	}
 
-	items := buildRolePickItems()
+	items := buildSlotPickItems(m.slots)
 	m.pickerList.SetItems(items)
-	m.pickerList.Title = fmt.Sprintf("Role for %s", item.target.Name)
+	m.pickerList.Title = fmt.Sprintf("Slot for %s", item.target.Name)
 	m.pickerList.ResetFilter()
 	m.pickerList.Select(0)
 
-	m.pickerKind = pickRole
+	m.pickerKind = pickSlot
 	m.pickerTargetName = item.target.Name
 	m.view = viewPicker
 	m.status = ""
 	return m, nil
 }
 
-// openModelPicker opens a list picker to assign a model to the selected role.
+// openModelPicker opens a list picker to assign a model to the selected slot.
 func (m Model) openModelPicker() (tea.Model, tea.Cmd) {
-	item, ok := m.roleList.SelectedItem().(roleItem)
+	item, ok := m.slotList.SelectedItem().(slotItem)
 	if !ok {
 		return m, nil
 	}
 
 	items := buildModelPickItems(m.state.Models)
 	m.pickerList.SetItems(items)
-	m.pickerList.Title = fmt.Sprintf("Model for %s", item.role)
+	m.pickerList.Title = fmt.Sprintf("Model for %s", item.slot.Name)
 	m.pickerList.ResetFilter()
 	m.pickerList.Select(0)
 
 	m.pickerKind = pickModel
-	m.pickerRole = item.role
+	m.pickerSlotID = item.slot.ID
 	m.view = viewPicker
 	m.status = ""
 	return m, nil
@@ -503,53 +522,53 @@ func (m Model) handlePickerSelect() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	if m.pickerKind == pickRole {
+	if m.pickerKind == pickSlot {
 		targetName := m.pickerTargetName
 		value := item.value
 		return m, func() tea.Msg {
 			if value == "" {
-				return rolePickDoneMsg{targetName: targetName, cleared: true}
+				return slotPickDoneMsg{targetName: targetName, cleared: true}
 			}
-			return rolePickDoneMsg{targetName: targetName, role: config.UserRole(value)}
+			return slotPickDoneMsg{targetName: targetName, slotID: value}
 		}
 	}
 
 	// Model picker
-	role := m.pickerRole
+	slotID := m.pickerSlotID
 	value := item.value
 	return m, func() tea.Msg {
 		if value == "" {
-			return modelPickDoneMsg{role: role, cleared: true}
+			return modelPickDoneMsg{slotID: slotID, cleared: true}
 		}
-		return modelPickDoneMsg{role: role, model: value}
+		return modelPickDoneMsg{slotID: slotID, model: value}
 	}
 }
 
-func (m Model) applyRouting() (tea.Model, tea.Cmd) {
-	routing := m.routing
+func (m Model) applySlots() (tea.Model, tea.Cmd) {
+	slots := m.slots
 	targets := m.state.Targets
 	return m, func() tea.Msg {
-		err := config.ApplyRouting(routing, targets)
+		err := config.ApplySlots(slots, targets)
 		return applyResultMsg{err: err}
 	}
 }
 
-func (m Model) saveRoutingCmd() tea.Cmd {
-	routing := m.routing
+func (m Model) saveSlotsCmd() tea.Cmd {
+	slots := m.slots
 	return func() tea.Msg {
-		err := config.SaveRouting(routing)
-		return saveRoutingMsg{err: err}
+		err := config.SaveSlots(slots)
+		return saveSlotsMsg{err: err}
 	}
 }
 
-func (m *Model) rebuildAgentList() {
-	items := buildTargetItems(m.state.Targets, m.routing)
-	m.agentList.SetItems(items)
+func (m *Model) rebuildAssignmentList() {
+	items := buildTargetItems(m.state.Targets, m.slots)
+	m.assignmentList.SetItems(items)
 }
 
-func (m *Model) rebuildRoleList() {
-	items := buildRoleItems(m.routing)
-	m.roleList.SetItems(items)
+func (m *Model) rebuildSlotList() {
+	items := buildSlotItems(m.slots)
+	m.slotList.SetItems(items)
 }
 
 // -- View --------------------------------------------------------------------
@@ -558,28 +577,28 @@ func (m Model) View() string {
 	var content string
 
 	switch m.view {
-	case viewAgents:
-		content = m.agentList.View()
+	case viewAssignments:
+		content = m.assignmentList.View()
 		if m.status != "" {
 			content += "\n" + statusStyle.Render(m.status)
 		}
-		content += "\n" + faintStyle.Render("r: assign role  a: apply routing  tab: roles view  q: quit")
+		content += "\n" + faintStyle.Render("s: assign slot  a: apply slots  tab: slots view  q: quit")
 
-	case viewRoles:
-		content = m.roleList.View()
+	case viewSlots:
+		content = m.slotList.View()
 		if m.status != "" {
 			content += "\n" + statusStyle.Render(m.status)
 		}
 		var summary []string
-		for _, r := range config.AllUserRoles() {
+		for _, s := range m.slots.Slots {
 			model := faintStyle.Render("—")
-			if m, ok := m.routing.RoleModels[r]; ok && m != "" {
-				model = roleStyle.Render(m)
+			if s.Model != "" {
+				model = slotStyle.Render(s.Model)
 			}
-			summary = append(summary, fmt.Sprintf("  %s → %s", roleStyle.Render(string(r)), model))
+			summary = append(summary, fmt.Sprintf("  %s → %s", slotStyle.Render(s.Name), model))
 		}
 		content += "\n" + strings.Join(summary, "\n")
-		content += "\n" + faintStyle.Render("enter: set model  tab: agents view  esc: back  q: quit")
+		content += "\n" + faintStyle.Render("enter: set model  tab: assignments view  esc: back  q: quit")
 
 	case viewPicker:
 		content = m.pickerList.View()

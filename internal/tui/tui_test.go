@@ -9,9 +9,9 @@ import (
 )
 
 func TestUpdate_WindowSizeDoesNotPanic(t *testing.T) {
-	m := New(&config.State{}, config.RoutingConfig{
-		RoleModels:  map[config.UserRole]string{},
-		TargetRoles: map[string]config.UserRole{},
+	m := New(&config.State{}, config.SlotsConfig{
+		Slots:       []config.Slot{},
+		TargetSlots: map[string]string{},
 	})
 
 	defer func() {
@@ -23,15 +23,15 @@ func TestUpdate_WindowSizeDoesNotPanic(t *testing.T) {
 	_, _ = m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
 }
 
-func TestView_AgentsView_ShowsTitle(t *testing.T) {
+func TestView_AssignmentsView_ShowsTitle(t *testing.T) {
 	state := &config.State{
 		Targets: []config.Target{
 			{Name: "build", Kind: config.KindAgent, Mode: "primary", Model: "anthropic/claude-opus-4"},
 		},
 	}
-	m := New(state, config.RoutingConfig{
-		RoleModels:  map[config.UserRole]string{},
-		TargetRoles: map[string]config.UserRole{},
+	m := New(state, config.SlotsConfig{
+		Slots:       []config.Slot{},
+		TargetSlots: map[string]string{},
 	})
 
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 80})
@@ -42,15 +42,15 @@ func TestView_AgentsView_ShowsTitle(t *testing.T) {
 	}
 }
 
-func TestView_AgentsView_ShowsAgentName(t *testing.T) {
+func TestView_AssignmentsView_ShowsAgentName(t *testing.T) {
 	state := &config.State{
 		Targets: []config.Target{
 			{Name: "build", Kind: config.KindAgent, Mode: "primary", Model: "anthropic/claude-opus-4"},
 		},
 	}
-	m := New(state, config.RoutingConfig{
-		RoleModels:  map[config.UserRole]string{},
-		TargetRoles: map[string]config.UserRole{},
+	m := New(state, config.SlotsConfig{
+		Slots:       []config.Slot{},
+		TargetSlots: map[string]string{},
 	})
 
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 80})
@@ -61,23 +61,23 @@ func TestView_AgentsView_ShowsAgentName(t *testing.T) {
 	}
 }
 
-func TestView_AgentsView_ShowsAssignedRole(t *testing.T) {
+func TestView_AssignmentsView_ShowsAssignedSlot(t *testing.T) {
 	state := &config.State{
 		Targets: []config.Target{
 			{Name: "build", Kind: config.KindAgent, Mode: "primary"},
 		},
 	}
-	routing := config.RoutingConfig{
-		RoleModels:  map[config.UserRole]string{config.RoleBrain: "anthropic/claude-opus-4"},
-		TargetRoles: map[string]config.UserRole{"build": config.RoleBrain},
+	slots := config.SlotsConfig{
+		Slots:       []config.Slot{{ID: "slot-1", Name: "Brain", Model: "anthropic/claude-opus-4"}},
+		TargetSlots: map[string]string{"build": "slot-1"},
 	}
-	m := New(state, routing)
+	m := New(state, slots)
 
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 80})
 	rendered := updated.(Model).View()
 
-	if !strings.Contains(rendered, "brain") {
-		t.Fatalf("expected role 'brain' in render, got:\n%s", rendered)
+	if !strings.Contains(rendered, "Brain") {
+		t.Fatalf("expected slot name 'Brain' in render, got:\n%s", rendered)
 	}
 }
 
@@ -86,11 +86,11 @@ func TestBuildTargetItems_HiddenAgentsExcluded(t *testing.T) {
 		{Name: "build", Kind: config.KindAgent},
 		{Name: "hidden-agent", Kind: config.KindAgent, Hidden: true},
 	}
-	routing := config.RoutingConfig{
-		RoleModels:  map[config.UserRole]string{},
-		TargetRoles: map[string]config.UserRole{},
+	slots := config.SlotsConfig{
+		Slots:       []config.Slot{},
+		TargetSlots: map[string]string{},
 	}
-	items := buildTargetItems(targets, routing)
+	items := buildTargetItems(targets, slots)
 
 	for _, item := range items {
 		if ti, ok := item.(targetItem); ok && ti.target.Name == "hidden-agent" {
@@ -104,11 +104,11 @@ func TestBuildTargetItems_SeparatesAgentsAndCommands(t *testing.T) {
 		{Name: "build", Kind: config.KindAgent},
 		{Name: "deploy", Kind: config.KindCommand},
 	}
-	routing := config.RoutingConfig{
-		RoleModels:  map[config.UserRole]string{},
-		TargetRoles: map[string]config.UserRole{},
+	slots := config.SlotsConfig{
+		Slots:       []config.Slot{},
+		TargetSlots: map[string]string{},
 	}
-	items := buildTargetItems(targets, routing)
+	items := buildTargetItems(targets, slots)
 
 	var sections []string
 	for _, item := range items {
@@ -121,58 +121,64 @@ func TestBuildTargetItems_SeparatesAgentsAndCommands(t *testing.T) {
 	}
 }
 
-func TestBuildRoleItems_AllFiveRoles(t *testing.T) {
-	routing := config.RoutingConfig{
-		RoleModels:  map[config.UserRole]string{},
-		TargetRoles: map[string]config.UserRole{},
+func TestBuildSlotItems_AllSlots(t *testing.T) {
+	slots := config.SlotsConfig{
+		Slots: []config.Slot{
+			{ID: "slot-1", Name: "Brain", Model: "anthropic/claude-opus-4"},
+			{ID: "slot-2", Name: "Worker", Model: ""},
+			{ID: "slot-3", Name: "Fast", Model: "anthropic/claude-haiku-4"},
+			{ID: "slot-4", Name: "Cheap", Model: ""},
+		},
+		TargetSlots: map[string]string{},
 	}
-	items := buildRoleItems(routing)
+	items := buildSlotItems(slots)
 
-	if len(items) != 5 {
-		t.Fatalf("expected 5 role items, got %d", len(items))
+	if len(items) != 4 {
+		t.Fatalf("expected 4 slot items, got %d", len(items))
 	}
 	names := make(map[string]bool)
 	for _, item := range items {
-		if ri, ok := item.(roleItem); ok {
-			names[string(ri.role)] = true
+		if si, ok := item.(slotItem); ok {
+			names[si.slot.Name] = true
 		}
 	}
-	for _, r := range config.AllUserRoles() {
-		if !names[string(r)] {
-			t.Errorf("missing role %q in role items", r)
+	for _, s := range slots.Slots {
+		if !names[s.Name] {
+			t.Errorf("missing slot %q in slot items", s.Name)
 		}
 	}
 }
 
-func TestBuildRoleItems_ShowsMappedModel(t *testing.T) {
-	routing := config.RoutingConfig{
-		RoleModels:  map[config.UserRole]string{config.RoleBrain: "anthropic/claude-opus-4"},
-		TargetRoles: map[string]config.UserRole{},
+func TestBuildSlotItems_ShowsMappedModel(t *testing.T) {
+	slots := config.SlotsConfig{
+		Slots:       []config.Slot{{ID: "slot-1", Name: "Brain", Model: "anthropic/claude-opus-4"}},
+		TargetSlots: map[string]string{},
 	}
-	items := buildRoleItems(routing)
+	items := buildSlotItems(slots)
 
 	for _, item := range items {
-		if ri, ok := item.(roleItem); ok && ri.role == config.RoleBrain {
-			if ri.model != "anthropic/claude-opus-4" {
-				t.Errorf("brain role model = %q, want anthropic/claude-opus-4", ri.model)
+		if si, ok := item.(slotItem); ok && si.slot.ID == "slot-1" {
+			if si.slot.Model != "anthropic/claude-opus-4" {
+				t.Errorf("slot-1 model = %q, want anthropic/claude-opus-4", si.slot.Model)
 			}
 			return
 		}
 	}
-	t.Error("brain role not found in items")
+	t.Error("slot-1 not found in items")
 }
 
-func TestBuildRoleItems_UnmappedShowsPlaceholder(t *testing.T) {
-	routing := config.RoutingConfig{
-		RoleModels:  map[config.UserRole]string{},
-		TargetRoles: map[string]config.UserRole{},
+func TestBuildSlotItems_UnmappedShowsPlaceholder(t *testing.T) {
+	slots := config.SlotsConfig{
+		Slots:       []config.Slot{{ID: "slot-1", Name: "Brain", Model: ""}},
+		TargetSlots: map[string]string{},
 	}
-	items := buildRoleItems(routing)
+	items := buildSlotItems(slots)
 
 	for _, item := range items {
-		if ri, ok := item.(roleItem); ok {
-			if ri.model != "(unmapped)" {
-				t.Errorf("role %q model = %q, want (unmapped)", ri.role, ri.model)
+		if si, ok := item.(slotItem); ok {
+			desc := si.Description()
+			if !strings.Contains(desc, "(unmapped)") {
+				t.Errorf("slot %q description = %q, want to contain (unmapped)", si.slot.Name, desc)
 			}
 		}
 	}

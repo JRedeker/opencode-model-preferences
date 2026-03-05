@@ -64,8 +64,11 @@ func TestRun_RefreshCalledBeforeLoad(t *testing.T) {
 		}
 	}`)
 
-	// run() will fail when it tries to start the TUI (no TTY in tests), but
-	// we only care that refresh was called before that point.
+	// Mock runProgram so the TUI doesn't hang waiting for a TTY.
+	withRunProgram(t, func(m tea.Model) (tea.Model, error) {
+		return m, tea.ErrInterrupted
+	})
+
 	var buf bytes.Buffer
 	_ = run(&buf)
 
@@ -105,6 +108,11 @@ func TestRun_RefreshCommandIsCorrect(t *testing.T) {
 
 	withConfigDir(t, `{"provider": {"anthropic": {"models": {"claude-sonnet-4": {}}}}}`)
 
+	// Mock runProgram so the TUI doesn't hang waiting for a TTY.
+	withRunProgram(t, func(m tea.Model) (tea.Model, error) {
+		return m, tea.ErrInterrupted
+	})
+
 	var buf bytes.Buffer
 	_ = run(&buf)
 
@@ -130,10 +138,15 @@ func TestRun_CLIFetchFailureAllowsLaunchWithConfigModels(t *testing.T) {
 	// Config has models — fallback should kick in
 	withConfigDir(t, `{"provider": {"anthropic": {"models": {"claude-sonnet-4": {"name": "Claude Sonnet 4"}}}}}`)
 
+	// Mock runProgram so the TUI doesn't hang waiting for a TTY.
+	withRunProgram(t, func(m tea.Model) (tea.Model, error) {
+		return m, tea.ErrInterrupted
+	})
+
 	var buf bytes.Buffer
 	err := run(&buf)
 
-	// run() may fail trying to start TUI (no TTY), but must NOT fail with "no models found"
+	// run() must NOT fail with "no models found" — fallback to config models should succeed
 	if err != nil && strings.Contains(err.Error(), "no models found") {
 		t.Errorf("CLI fetch failure should fall back to config models, not report 'no models found': %v", err)
 	}

@@ -26,28 +26,6 @@ const (
 	KindCommand TargetKind = "command"
 )
 
-// Role classifies a target as orchestrator (primary/all agents, commands) or
-// worker (subagents). Used by the routing system to apply model mappings.
-type Role string
-
-const (
-	RoleOrchestrator Role = "orchestrator"
-	RoleWorker       Role = "worker"
-)
-
-// RoleForTarget returns the routing role for a target.
-// Commands always map to orchestrator regardless of any mode field.
-// Agents with mode "subagent" map to worker; all others map to orchestrator.
-func RoleForTarget(t Target) Role {
-	if t.Kind == KindCommand {
-		return RoleOrchestrator
-	}
-	if t.Mode == "subagent" {
-		return RoleWorker
-	}
-	return RoleOrchestrator
-}
-
 // Target represents an agent or command that can have a model preference.
 type Target struct {
 	Name        string
