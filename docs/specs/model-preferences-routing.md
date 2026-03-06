@@ -2,40 +2,36 @@
 
 ## Purpose
 
-Define how `omp` resolves and applies model mappings for OpenCode targets.
+Define how `omp` resolves and applies model preferences for OpenCode targets.
 
-## Routing Sources
+## Config
 
-`omp` supports two routing sources in `omp-slots.json`:
+Preferences are stored in `omp-preferences.json`:
 
-1. `target_slots` (target -> slot)
-2. `target_models` (target -> model, direct)
+```json
+{
+  "target_models": {
+    "build": "anthropic/claude-opus-4",
+    "general": "anthropic/claude-haiku-4"
+  }
+}
+```
 
-## Resolution Order
+Each target (agent or command) maps directly to a model ID.
 
-When applying mappings, each target resolves in this order:
+## Resolution
 
-1. If `target_models[target]` is non-empty, use that model.
-2. Else if `target_slots[target]` exists and slot has a non-empty model, use slot model.
-3. Else leave target unchanged.
+When applying preferences, each target resolves as:
 
-This guarantees deterministic precedence:
+1. If `target_models[target]` is non-empty, write that model to `opencode.json`.
+2. Else leave target unchanged.
 
-`direct model > slot model > unchanged`
+Only targets that already exist in `opencode.json` are written to.
 
 ## TUI Controls
 
-### Assignments view
-
-- `s` assign/clear slot
-- `m` assign/clear direct model
-- `a` apply mappings
-
-### Slots view
-
-- `enter` set slot model
-- `r` rename slot
-- `n` add slot
-- `x` remove slot
-
-Removing a slot clears any `target_slots` entries pointing to that slot.
+- `enter` / `m` — pick a model for the selected agent/command
+- `d` — clear model assignment
+- `a` — apply all preferences to `opencode.json`
+- `/` — filter the list
+- `q` — quit

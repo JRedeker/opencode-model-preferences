@@ -1,218 +1,105 @@
 {
   "$schema": "https://raw.githubusercontent.com/anomalyco/oc-plugins/main/advance/plugin/schemas/spec.schema.json",
   "name": "model-preferences-routing",
-  "title": "Model Preferences Routing",
-  "purpose": "TUI for managing orchestrator/worker model routing in OpenCode. Users define named mappings pairing an orchestrator model with a worker model, then activate a mapping to apply it globally across all agents and commands.",
-  "version": "3.0.0",
-  "updated_at": "2026-03-04T21:00:00.000Z",
+  "title": "Model Preferences",
+  "purpose": "TUI for managing per-agent/per-command model preferences in OpenCode. Users pick a model for each agent or command, then apply to write preferences to opencode.json.",
+  "version": "4.0.0",
+  "updated_at": "2026-03-06T23:00:00.000Z",
   "requirements": [
     {
-      "id": "rq-R0LECLASS",
-      "title": "Role Classification",
-      "body": "The system must classify every target (agent or command) as either 'orchestrator' or 'worker' based on its kind and mode. Commands always map to orchestrator. Agents with mode 'subagent' map to worker; all others (primary, all, empty) map to orchestrator.",
+      "id": "rq-PR3FSCFG",
+      "title": "Preferences Config in Separate File",
+      "body": "Preferences (target-to-model mappings) must be stored in a separate file (~/.config/opencode/omp-preferences.json), NOT in opencode.json. This is required because opencode.json uses additionalProperties:false and rejects unknown keys. The path must respect OPENCODE_CONFIG_DIR.",
       "priority": "must",
-      "tags": ["config", "routing", "roles"],
+      "tags": ["config", "persistence"],
       "scenarios": [
         {
-          "id": "rq-R0LECLASS.1",
-          "title": "Primary agent is orchestrator",
-          "given": ["an agent with mode 'primary'"],
-          "when": "RoleForTarget is called",
-          "then": ["returns RoleOrchestrator"]
-        },
-        {
-          "id": "rq-R0LECLASS.2",
-          "title": "Subagent is worker",
-          "given": ["an agent with mode 'subagent'"],
-          "when": "RoleForTarget is called",
-          "then": ["returns RoleWorker"]
-        },
-        {
-          "id": "rq-R0LECLASS.3",
-          "title": "All-mode agent is orchestrator",
-          "given": ["an agent with mode 'all' or empty mode"],
-          "when": "RoleForTarget is called",
-          "then": ["returns RoleOrchestrator"]
-        },
-        {
-          "id": "rq-R0LECLASS.4",
-          "title": "Command is always orchestrator",
-          "given": ["a command target (any mode)"],
-          "when": "RoleForTarget is called",
-          "then": ["returns RoleOrchestrator regardless of mode field"]
-        }
-      ]
-    },
-    {
-      "id": "rq-R0UTECFG",
-      "title": "Routing Config in Separate File",
-      "body": "Routing configuration (named mappings) must be stored in a separate file (~/.config/opencode/omp-routing.json), NOT in opencode.json. This is required because opencode.json uses additionalProperties:false and rejects unknown keys. The path must respect OPENCODE_CONFIG_DIR.",
-      "priority": "must",
-      "tags": ["config", "persistence", "routing"],
-      "scenarios": [
-        {
-          "id": "rq-R0UTECFG.1",
-          "title": "Routing path respects OPENCODE_CONFIG_DIR",
+          "id": "rq-PR3FSCFG.1",
+          "title": "Preferences path respects OPENCODE_CONFIG_DIR",
           "given": ["OPENCODE_CONFIG_DIR is set to a custom directory"],
-          "when": "RoutingPath() is called",
-          "then": ["returns {OPENCODE_CONFIG_DIR}/omp-routing.json"]
+          "when": "PreferencesPath() is called",
+          "then": ["returns {OPENCODE_CONFIG_DIR}/omp-preferences.json"]
         },
         {
-          "id": "rq-R0UTECFG.2",
+          "id": "rq-PR3FSCFG.2",
           "title": "Missing file returns empty config",
-          "given": ["omp-routing.json does not exist"],
-          "when": "LoadRouting() is called",
-          "then": ["returns empty RoutingConfig with no error"]
+          "given": ["omp-preferences.json does not exist"],
+          "when": "LoadPreferences() is called",
+          "then": ["returns empty PreferencesConfig with no error"]
         },
         {
-          "id": "rq-R0UTECFG.3",
+          "id": "rq-PR3FSCFG.3",
           "title": "Writes are atomic",
-          "given": ["a routing config to save"],
-          "when": "SaveRouting() is called",
+          "given": ["a preferences config to save"],
+          "when": "SavePreferences() is called",
           "then": ["writes to a temp file then renames", "no temp files remain after success"]
         }
       ]
     },
     {
-      "id": "rq-M4PPINGCRUD",
-      "title": "Mapping CRUD",
-      "body": "The system must support creating, reading, updating, and deleting named mappings. Each mapping has a name, an orchestrator model ID, and a worker model ID. Mappings are persisted in omp-routing.json.",
+      "id": "rq-4PPLYPREFS",
+      "title": "Apply Preferences",
+      "body": "Applying preferences writes the assigned model to each target's model field in opencode.json. Uses sjson for surgical JSON path updates that preserve formatting. Only writes to targets that already exist in opencode.json (does not create new entries). Targets without an assignment are left unchanged.",
       "priority": "must",
-      "tags": ["config", "crud", "mappings"],
+      "tags": ["config", "activation"],
       "scenarios": [
         {
-          "id": "rq-M4PPINGCRUD.1",
-          "title": "Create a new mapping",
-          "given": ["an empty routing config"],
-          "when": "a mapping is created via the TUI form",
-          "then": ["the mapping is appended to the mappings list", "the routing config is saved to disk"]
+          "id": "rq-4PPLYPREFS.1",
+          "title": "Model applied to agent",
+          "given": ["a preference mapping build to 'anthropic/claude-opus-4'", "agent build exists in config"],
+          "when": "preferences are applied",
+          "then": ["agent.build.model is set to 'anthropic/claude-opus-4'"]
         },
         {
-          "id": "rq-M4PPINGCRUD.2",
-          "title": "Edit an existing mapping",
-          "given": ["a routing config with mapping 'fast'"],
-          "when": "the user edits 'fast' via the TUI form",
-          "then": ["the mapping is updated in-place", "the routing config is saved to disk"]
-        },
-        {
-          "id": "rq-M4PPINGCRUD.3",
-          "title": "Delete a mapping",
-          "given": ["a routing config with mapping 'fast'"],
-          "when": "the user presses 'd' on 'fast'",
-          "then": ["the mapping is removed from the list", "the routing config is saved to disk"]
-        }
-      ]
-    },
-    {
-      "id": "rq-4PPLYMAP",
-      "title": "Apply Active Mapping",
-      "body": "Activating a mapping writes the orchestrator model to all primary/all agents and commands, and the worker model to all subagents, in opencode.json. Uses sjson chaining for a single atomic file operation. Only writes to agents/commands that already have an entry in opencode.json (does not create new entries).",
-      "priority": "must",
-      "tags": ["config", "activation", "routing"],
-      "scenarios": [
-        {
-          "id": "rq-4PPLYMAP.1",
-          "title": "Orchestrator model applied to primary agents",
-          "given": ["a mapping with orchestrator 'anthropic/claude-opus-4'", "agents build and plan with mode primary exist in config"],
-          "when": "the mapping is activated",
-          "then": ["agent.build.model and agent.plan.model are set to 'anthropic/claude-opus-4'"]
-        },
-        {
-          "id": "rq-4PPLYMAP.2",
-          "title": "Worker model applied to subagents",
-          "given": ["a mapping with worker 'anthropic/claude-haiku-4'", "agents general and explore with mode subagent exist in config"],
-          "when": "the mapping is activated",
-          "then": ["agent.general.model and agent.explore.model are set to 'anthropic/claude-haiku-4'"]
-        },
-        {
-          "id": "rq-4PPLYMAP.3",
-          "title": "Commands get orchestrator model",
-          "given": ["a mapping with orchestrator 'anthropic/claude-opus-4'", "command deploy exists in config"],
-          "when": "the mapping is activated",
+          "id": "rq-4PPLYPREFS.2",
+          "title": "Model applied to command",
+          "given": ["a preference mapping deploy to 'anthropic/claude-opus-4'", "command deploy exists in config"],
+          "when": "preferences are applied",
           "then": ["command.deploy.model is set to 'anthropic/claude-opus-4'"]
         },
         {
-          "id": "rq-4PPLYMAP.4",
-          "title": "Activation warns about existing preferences",
-          "given": ["agents already have model preferences set"],
-          "when": "the user presses 'a' to activate",
-          "then": ["a warning is shown listing affected agents", "a second 'a' press is required to confirm"]
-        },
-        {
-          "id": "rq-4PPLYMAP.5",
+          "id": "rq-4PPLYPREFS.3",
           "title": "Only writes to existing config entries",
           "given": ["a target exists in discovery but has no entry in opencode.json"],
-          "when": "the mapping is activated",
+          "when": "preferences are applied",
           "then": ["no new agent/command entry is created in opencode.json"]
-        }
-      ]
-    },
-    {
-      "id": "rq-M4PPINGVIEW",
-      "title": "Mapping List View",
-      "body": "The TUI must display a list of saved mappings with section headers. Each mapping shows its name, orchestrator model, and worker model. A '(+ new mapping)' entry allows creating new mappings. The list supports filtering.",
-      "priority": "must",
-      "tags": ["tui", "listing", "mappings"],
-      "scenarios": [
-        {
-          "id": "rq-M4PPINGVIEW.1",
-          "title": "Empty state shows new mapping entry",
-          "given": ["no mappings exist"],
-          "when": "the TUI is opened",
-          "then": ["the list shows an Actions section with '(+ new mapping)'"]
         },
         {
-          "id": "rq-M4PPINGVIEW.2",
-          "title": "Mappings appear with details",
-          "given": ["a mapping 'quality' exists"],
-          "when": "the TUI is opened",
-          "then": ["the list shows 'quality' with orchestrator and worker model IDs"]
-        }
-      ]
-    },
-    {
-      "id": "rq-M4PPINGEDIT",
-      "title": "Mapping Editor with huh",
-      "body": "Creating or editing a mapping uses a charmbracelet/huh form with fields for name, orchestrator model (select from discovered models), and worker model (select from discovered models).",
-      "priority": "must",
-      "tags": ["tui", "form", "huh"],
-      "scenarios": [
-        {
-          "id": "rq-M4PPINGEDIT.1",
-          "title": "Form shows discovered models",
-          "given": ["models are discovered from CLI or config"],
-          "when": "the user opens the mapping editor",
-          "then": ["orchestrator and worker selects show all discovered model IDs"]
+          "id": "rq-4PPLYPREFS.4",
+          "title": "No assignment leaves target unchanged",
+          "given": ["a target has no entry in preferences"],
+          "when": "preferences are applied",
+          "then": ["the target's model in opencode.json is not modified"]
         },
         {
-          "id": "rq-M4PPINGEDIT.2",
-          "title": "Edit pre-fills existing values",
-          "given": ["editing an existing mapping 'fast'"],
-          "when": "the form opens",
-          "then": ["name, orchestrator, and worker fields are pre-filled with current values"]
+          "id": "rq-4PPLYPREFS.5",
+          "title": "Empty model leaves target unchanged",
+          "given": ["a target has an empty string model in preferences"],
+          "when": "preferences are applied",
+          "then": ["the target's model in opencode.json is not modified"]
         }
       ]
     },
     {
       "id": "rq-Qvl5PkuG",
       "title": "Dual-File Persistence",
-      "body": "The system uses two config files: opencode.json for agent/command model assignments (written by ApplyActiveMapping), and omp-routing.json for routing mappings (written by SaveRouting). Writes to opencode.json use tidwall/sjson for surgical JSON path updates that preserve formatting. Writes to omp-routing.json use atomic temp+rename.",
+      "body": "The system uses two config files: opencode.json for agent/command model assignments (written by ApplyPreferences), and omp-preferences.json for preference mappings (written by SavePreferences). Writes to opencode.json use tidwall/sjson for surgical JSON path updates that preserve formatting. Writes to omp-preferences.json use atomic temp+rename.",
       "priority": "must",
-      "tags": ["persistence", "config", "global"],
+      "tags": ["persistence", "config"],
       "scenarios": [
         {
           "id": "rq-Qvl5PkuG.1",
           "title": "sjson preserves formatting",
           "given": ["opencode.json has existing formatting"],
-          "when": "a mapping is activated",
+          "when": "preferences are applied",
           "then": ["existing structure is preserved", "only model fields are updated"]
         },
         {
           "id": "rq-Qvl5PkuG.2",
-          "title": "Routing config is separate from opencode.json",
+          "title": "Preferences config is separate from opencode.json",
           "given": ["opencode.json uses additionalProperties:false"],
-          "when": "routing mappings are saved",
-          "then": ["mappings are written to omp-routing.json, not opencode.json"]
+          "when": "preferences are saved",
+          "then": ["preferences are written to omp-preferences.json, not opencode.json"]
         }
       ]
     },
@@ -249,7 +136,7 @@
     {
       "id": "rq-gXZ8NWRB",
       "title": "Agent Filtering",
-      "body": "System agents (compaction, title, summary) must be excluded from target discovery. All other agents (built-in user-facing and user-defined) must be included. Agents are categorized by mode for role classification.",
+      "body": "System agents (compaction, title, summary) must be excluded from target discovery. All other agents (built-in user-facing and user-defined) must be included.",
       "priority": "must",
       "tags": ["filtering", "agents"],
       "scenarios": [
@@ -259,20 +146,13 @@
           "given": ["config has agents: build, plan, compaction, title, summary"],
           "when": "discoverTargets is called",
           "then": ["build and plan are included", "compaction, title, and summary are excluded"]
-        },
-        {
-          "id": "rq-gXZ8NWRB.2",
-          "title": "Agents categorized by mode",
-          "given": ["agent 'build' has mode 'primary'", "agent 'explore' has mode 'subagent'"],
-          "when": "targets are discovered",
-          "then": ["build is classified as orchestrator", "explore is classified as worker"]
         }
       ]
     },
     {
       "id": "rq-T4RGETDISC",
       "title": "Target Discovery",
-      "body": "The system discovers targets from three sources: built-in agents (build, plan as primary/locked; general, explore as subagent), markdown agent/command files (global + project directories), and JSON-configured agents/commands in opencode.json. Markdown mode wins over JSON default. Hidden agents are tracked but may be filtered in display.",
+      "body": "The system discovers targets from three sources: built-in agents (build, plan as primary/locked; general, explore as subagent), markdown agent/command files (global + project directories), and JSON-configured agents/commands in opencode.json. Markdown mode wins over JSON default. Hidden agents are tracked but filtered in display.",
       "priority": "must",
       "tags": ["discovery", "agents", "commands"],
       "scenarios": [
@@ -300,55 +180,32 @@
       ]
     },
     {
-      "id": "rq-V4LIDMAP",
-      "title": "Mapping Validation",
-      "body": "When creating or editing a mapping, the system warns (does not block) if the orchestrator or worker model ID is not found in the discovered model list. Validation is advisory since models may be available at runtime but not at config time.",
-      "priority": "should",
-      "tags": ["validation", "mappings"],
+      "id": "rq-TU1VIEW",
+      "title": "Single-View TUI",
+      "body": "The TUI displays a single list of agents and commands with their current model assignment. Users pick a model via a filterable picker, clear assignments, and apply all preferences to opencode.json.",
+      "priority": "must",
+      "tags": ["tui", "listing"],
       "scenarios": [
         {
-          "id": "rq-V4LIDMAP.1",
-          "title": "Valid models produce no warnings",
-          "given": ["both orchestrator and worker models exist in the discovered list"],
-          "when": "ValidateMapping is called",
-          "then": ["returns empty warnings"]
+          "id": "rq-TU1VIEW.1",
+          "title": "Agents and commands listed with sections",
+          "given": ["agents and commands exist"],
+          "when": "the TUI is opened",
+          "then": ["agents appear under an 'Agents' section header", "commands appear under a 'Commands' section header"]
         },
         {
-          "id": "rq-V4LIDMAP.2",
-          "title": "Unknown model produces advisory warning",
-          "given": ["the orchestrator model is not in the discovered list"],
-          "when": "ValidateMapping is called",
-          "then": ["returns a warning string mentioning the unknown model", "does not return an error"]
-        }
-      ]
-    },
-    {
-      "id": "rq-R0LETAX",
-      "title": "User Role Taxonomy",
-      "body": "The system declares five named user roles (brain, tasker, builder, librarian, fixer) as vocabulary for future model assignment. These roles are declarative only — not yet wired to routing or target-mapping logic. They are exported so callers can reference them in UI and documentation.",
-      "priority": "should",
-      "tags": ["roles", "taxonomy", "forward-declaration"],
-      "scenarios": [
-        {
-          "id": "rq-R0LETAX.1",
-          "title": "All five roles declared",
-          "given": ["the config package is imported"],
-          "when": "AllUserRoles() is called",
-          "then": ["returns exactly 5 roles: brain, tasker, builder, librarian, fixer"]
+          "id": "rq-TU1VIEW.2",
+          "title": "Hidden agents excluded from display",
+          "given": ["an agent has hidden: true in frontmatter"],
+          "when": "the TUI is opened",
+          "then": ["the hidden agent does not appear in the list"]
         },
         {
-          "id": "rq-R0LETAX.2",
-          "title": "Each role has a description",
-          "given": ["a valid UserRole"],
-          "when": "UserRoleDescription is called",
-          "then": ["returns a non-empty description string"]
-        },
-        {
-          "id": "rq-R0LETAX.3",
-          "title": "User roles do not affect routing",
-          "given": ["user roles are declared"],
-          "when": "RoleForTarget is called on any target",
-          "then": ["classification is unchanged — still based on Kind/Mode, not UserRole"]
+          "id": "rq-TU1VIEW.3",
+          "title": "Model picker shows discovered models",
+          "given": ["models are discovered from CLI or config"],
+          "when": "the user presses enter/m on a target",
+          "then": ["a filterable picker shows all discovered model IDs plus a clear option"]
         }
       ]
     }

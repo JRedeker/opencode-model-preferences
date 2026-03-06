@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"os"
 
 	"github.com/anomalyco/opencode-model-preferences/internal/config"
@@ -45,25 +44,12 @@ func run(w io.Writer) error {
 		)
 	}
 
-	// Migrate from legacy omp-routing.json to omp-slots.json if needed.
-	if migrated, err := config.MigrateRoutingToSlots(); err != nil {
-		// Migration failure is non-fatal: log and continue with fresh slots.
-		log.Printf("omp: migration from omp-routing.json failed (continuing with defaults): %v", err)
-	} else if migrated {
-		log.Printf("omp: migrated omp-routing.json → omp-slots.json")
-	}
-
-	slots, err := config.LoadSlots()
+	prefs, err := config.LoadPreferences()
 	if err != nil {
-		return fmt.Errorf("loading slots config: %w", err)
+		return fmt.Errorf("loading preferences: %w", err)
 	}
 
-	// If no slots defined yet, initialize with defaults.
-	if len(slots.Slots) == 0 {
-		slots = config.DefaultSlotsConfig()
-	}
-
-	m := tui.New(state, slots)
+	m := tui.New(state, prefs)
 	if _, err := runProgram(m); err != nil {
 		if errors.Is(err, tea.ErrInterrupted) || errors.Is(err, tea.ErrProgramKilled) {
 			return nil

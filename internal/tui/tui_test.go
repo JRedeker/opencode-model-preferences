@@ -9,9 +9,8 @@ import (
 )
 
 func TestUpdate_WindowSizeDoesNotPanic(t *testing.T) {
-	m := New(&config.State{}, config.SlotsConfig{
-		Slots:       []config.Slot{},
-		TargetSlots: map[string]string{},
+	m := New(&config.State{}, config.PreferencesConfig{
+		TargetModels: map[string]string{},
 	})
 
 	defer func() {
@@ -29,9 +28,8 @@ func TestView_AssignmentsView_ShowsTitle(t *testing.T) {
 			{Name: "build", Kind: config.KindAgent, Mode: "primary", Model: "anthropic/claude-opus-4"},
 		},
 	}
-	m := New(state, config.SlotsConfig{
-		Slots:       []config.Slot{},
-		TargetSlots: map[string]string{},
+	m := New(state, config.PreferencesConfig{
+		TargetModels: map[string]string{},
 	})
 
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 80})
@@ -48,9 +46,8 @@ func TestView_AssignmentsView_ShowsAgentName(t *testing.T) {
 			{Name: "build", Kind: config.KindAgent, Mode: "primary", Model: "anthropic/claude-opus-4"},
 		},
 	}
-	m := New(state, config.SlotsConfig{
-		Slots:       []config.Slot{},
-		TargetSlots: map[string]string{},
+	m := New(state, config.PreferencesConfig{
+		TargetModels: map[string]string{},
 	})
 
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 80})
@@ -61,23 +58,22 @@ func TestView_AssignmentsView_ShowsAgentName(t *testing.T) {
 	}
 }
 
-func TestView_AssignmentsView_ShowsAssignedSlot(t *testing.T) {
+func TestView_AssignmentsView_ShowsAssignedModel(t *testing.T) {
 	state := &config.State{
 		Targets: []config.Target{
 			{Name: "build", Kind: config.KindAgent, Mode: "primary"},
 		},
 	}
-	slots := config.SlotsConfig{
-		Slots:       []config.Slot{{ID: "slot-1", Name: "Brain", Model: "anthropic/claude-opus-4"}},
-		TargetSlots: map[string]string{"build": "slot-1"},
+	prefs := config.PreferencesConfig{
+		TargetModels: map[string]string{"build": "anthropic/claude-opus-4"},
 	}
-	m := New(state, slots)
+	m := New(state, prefs)
 
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 80})
 	rendered := updated.(Model).View()
 
-	if !strings.Contains(rendered, "Brain") {
-		t.Fatalf("expected slot name 'Brain' in render, got:\n%s", rendered)
+	if !strings.Contains(rendered, "anthropic/claude-opus-4") {
+		t.Fatalf("expected model 'anthropic/claude-opus-4' in render, got:\n%s", rendered)
 	}
 }
 
@@ -86,11 +82,10 @@ func TestBuildTargetItems_HiddenAgentsExcluded(t *testing.T) {
 		{Name: "build", Kind: config.KindAgent},
 		{Name: "hidden-agent", Kind: config.KindAgent, Hidden: true},
 	}
-	slots := config.SlotsConfig{
-		Slots:       []config.Slot{},
-		TargetSlots: map[string]string{},
+	prefs := config.PreferencesConfig{
+		TargetModels: map[string]string{},
 	}
-	items := buildTargetItems(targets, slots)
+	items := buildTargetItems(targets, prefs)
 
 	for _, item := range items {
 		if ti, ok := item.(targetItem); ok && ti.target.Name == "hidden-agent" {
@@ -104,11 +99,10 @@ func TestBuildTargetItems_SeparatesAgentsAndCommands(t *testing.T) {
 		{Name: "build", Kind: config.KindAgent},
 		{Name: "deploy", Kind: config.KindCommand},
 	}
-	slots := config.SlotsConfig{
-		Slots:       []config.Slot{},
-		TargetSlots: map[string]string{},
+	prefs := config.PreferencesConfig{
+		TargetModels: map[string]string{},
 	}
-	items := buildTargetItems(targets, slots)
+	items := buildTargetItems(targets, prefs)
 
 	var sections []string
 	for _, item := range items {
@@ -121,204 +115,86 @@ func TestBuildTargetItems_SeparatesAgentsAndCommands(t *testing.T) {
 	}
 }
 
-func TestBuildSlotItems_AllSlots(t *testing.T) {
-	slots := config.SlotsConfig{
-		Slots: []config.Slot{
-			{ID: "slot-1", Name: "Brain", Model: "anthropic/claude-opus-4"},
-			{ID: "slot-2", Name: "Worker", Model: ""},
-			{ID: "slot-3", Name: "Fast", Model: "anthropic/claude-haiku-4"},
-			{ID: "slot-4", Name: "Cheap", Model: ""},
-		},
-		TargetSlots: map[string]string{},
+func TestBuildTargetItems_ShowsModelInDescription(t *testing.T) {
+	targets := []config.Target{
+		{Name: "build", Kind: config.KindAgent, Model: "anthropic/claude-opus-4"},
 	}
-	items := buildSlotItems(slots)
-
-	if len(items) != 4 {
-		t.Fatalf("expected 4 slot items, got %d", len(items))
-	}
-	names := make(map[string]bool)
-	for _, item := range items {
-		if si, ok := item.(slotItem); ok {
-			names[si.slot.Name] = true
-		}
-	}
-	for _, s := range slots.Slots {
-		if !names[s.Name] {
-			t.Errorf("missing slot %q in slot items", s.Name)
-		}
-	}
-}
-
-func TestBuildSlotItems_ShowsMappedModel(t *testing.T) {
-	slots := config.SlotsConfig{
-		Slots:       []config.Slot{{ID: "slot-1", Name: "Brain", Model: "anthropic/claude-opus-4"}},
-		TargetSlots: map[string]string{},
-	}
-	items := buildSlotItems(slots)
-
-	for _, item := range items {
-		if si, ok := item.(slotItem); ok && si.slot.ID == "slot-1" {
-			if si.slot.Model != "anthropic/claude-opus-4" {
-				t.Errorf("slot-1 model = %q, want anthropic/claude-opus-4", si.slot.Model)
-			}
-			return
-		}
-	}
-	t.Error("slot-1 not found in items")
-}
-
-func TestBuildSlotItems_UnmappedShowsPlaceholder(t *testing.T) {
-	slots := config.SlotsConfig{
-		Slots:       []config.Slot{{ID: "slot-1", Name: "Brain", Model: ""}},
-		TargetSlots: map[string]string{},
-	}
-	items := buildSlotItems(slots)
-
-	for _, item := range items {
-		if si, ok := item.(slotItem); ok {
-			desc := si.Description()
-			if !strings.Contains(desc, "(unmapped)") {
-				t.Errorf("slot %q description = %q, want to contain (unmapped)", si.slot.Name, desc)
-			}
-		}
-	}
-}
-
-func TestNextSlotID_UsesMaxSuffixPlusOne(t *testing.T) {
-	slots := []config.Slot{
-		{ID: "slot-1", Name: "Slot 1"},
-		{ID: "slot-4", Name: "Slot 4"},
-		{ID: "custom", Name: "Custom"},
-	}
-
-	got := nextSlotID(slots)
-	if got != "slot-5" {
-		t.Fatalf("nextSlotID() = %q, want slot-5", got)
-	}
-}
-
-func TestAddSlot_AppendsNewSlotWithDefaultName(t *testing.T) {
-	sc := config.SlotsConfig{
-		Slots: []config.Slot{
-			{ID: "slot-1", Name: "Slot 1"},
-			{ID: "slot-2", Name: "Slot 2"},
-		},
-		TargetSlots: map[string]string{},
-	}
-
-	added := addSlot(&sc)
-
-	if added.ID != "slot-3" {
-		t.Fatalf("added.ID = %q, want slot-3", added.ID)
-	}
-	if added.Name != "Slot 3" {
-		t.Fatalf("added.Name = %q, want Slot 3", added.Name)
-	}
-	if len(sc.Slots) != 3 {
-		t.Fatalf("len(sc.Slots) = %d, want 3", len(sc.Slots))
-	}
-}
-
-func TestRemoveSlot_RemovesAssignmentsToDeletedSlot(t *testing.T) {
-	sc := config.SlotsConfig{
-		Slots: []config.Slot{
-			{ID: "slot-1", Name: "Slot 1"},
-			{ID: "slot-2", Name: "Slot 2"},
-		},
-		TargetSlots: map[string]string{
-			"build":   "slot-1",
-			"general": "slot-1",
-			"deploy":  "slot-2",
-		},
-	}
-
-	removed, cleared := removeSlot(&sc, "slot-1")
-	if !removed {
-		t.Fatal("expected removed=true")
-	}
-	if cleared != 2 {
-		t.Fatalf("cleared = %d, want 2", cleared)
-	}
-	if len(sc.Slots) != 1 || sc.Slots[0].ID != "slot-2" {
-		t.Fatalf("remaining slots = %#v, want only slot-2", sc.Slots)
-	}
-	if _, ok := sc.TargetSlots["build"]; ok {
-		t.Fatal("build assignment should be removed")
-	}
-	if _, ok := sc.TargetSlots["general"]; ok {
-		t.Fatal("general assignment should be removed")
-	}
-	if got := sc.TargetSlots["deploy"]; got != "slot-2" {
-		t.Fatalf("deploy assignment = %q, want slot-2", got)
-	}
-}
-
-func TestRenameSlot_UpdatesMatchingSlotName(t *testing.T) {
-	sc := config.SlotsConfig{
-		Slots: []config.Slot{{ID: "slot-1", Name: "Slot 1"}},
-	}
-
-	ok := renameSlot(&sc, "slot-1", "Fast Lane")
-	if !ok {
-		t.Fatal("expected rename to succeed")
-	}
-	if sc.Slots[0].Name != "Fast Lane" {
-		t.Fatalf("slot name = %q, want Fast Lane", sc.Slots[0].Name)
-	}
-}
-
-func TestView_SlotsView_ShowsRenameAddRemoveHints(t *testing.T) {
-	state := &config.State{}
-	slots := config.SlotsConfig{
-		Slots: []config.Slot{{ID: "slot-1", Name: "Slot 1"}},
-	}
-	m := New(state, slots)
-	m.view = viewSlots
-
-	rendered := m.View()
-	if !strings.Contains(rendered, "r: rename slot") {
-		t.Fatalf("expected rename hint in slots view, got:\n%s", rendered)
-	}
-	if !strings.Contains(rendered, "n: add slot") {
-		t.Fatalf("expected add hint in slots view, got:\n%s", rendered)
-	}
-	if !strings.Contains(rendered, "x: remove slot") {
-		t.Fatalf("expected remove hint in slots view, got:\n%s", rendered)
-	}
-}
-
-func TestView_AssignmentsView_ShowsDirectModelHint(t *testing.T) {
-	state := &config.State{
-		Targets: []config.Target{{Name: "build", Kind: config.KindAgent}},
-	}
-	slots := config.SlotsConfig{Slots: []config.Slot{{ID: "slot-1", Name: "Slot 1"}}}
-	m := New(state, slots)
-
-	rendered := m.View()
-	if !strings.Contains(rendered, "m: direct model") {
-		t.Fatalf("expected direct model hint in assignments view, got:\n%s", rendered)
-	}
-}
-
-func TestBuildTargetItems_DirectModelShownInDescription(t *testing.T) {
-	targets := []config.Target{{Name: "build", Kind: config.KindAgent, Model: "anthropic/claude-opus-4"}}
-	slots := config.SlotsConfig{
-		Slots:        []config.Slot{{ID: "slot-1", Name: "Slot 1", Model: "anthropic/claude-sonnet-4"}},
-		TargetSlots:  map[string]string{"build": "slot-1"},
+	prefs := config.PreferencesConfig{
 		TargetModels: map[string]string{"build": "openai/gpt-5"},
 	}
 
-	items := buildTargetItems(targets, slots)
+	items := buildTargetItems(targets, prefs)
 	for _, item := range items {
 		ti, ok := item.(targetItem)
 		if !ok {
 			continue
 		}
 		desc := ti.Description()
-		if !strings.Contains(desc, "mapping: direct (openai/gpt-5)") {
-			t.Fatalf("expected direct mapping details in description, got: %s", desc)
+		if !strings.Contains(desc, "openai/gpt-5") {
+			t.Fatalf("expected model in description, got: %s", desc)
 		}
 		return
 	}
 	t.Fatal("target item not found")
+}
+
+func TestBuildTargetItems_PendingChangeShown(t *testing.T) {
+	targets := []config.Target{
+		{Name: "build", Kind: config.KindAgent, Model: "anthropic/claude-opus-4"},
+	}
+	prefs := config.PreferencesConfig{
+		TargetModels: map[string]string{"build": "openai/gpt-5"},
+	}
+
+	items := buildTargetItems(targets, prefs)
+	for _, item := range items {
+		ti, ok := item.(targetItem)
+		if !ok {
+			continue
+		}
+		desc := ti.Description()
+		// Should show pending change since pref differs from current
+		if !strings.Contains(desc, "pending") {
+			t.Fatalf("expected 'pending' in description when model differs, got: %s", desc)
+		}
+		return
+	}
+	t.Fatal("target item not found")
+}
+
+func TestBuildModelPickItems_IncludesClearOption(t *testing.T) {
+	models := []config.Model{
+		{ID: "anthropic/claude-opus-4", Provider: "anthropic", Name: "Claude Opus 4"},
+	}
+	items := buildModelPickItems(models)
+
+	if len(items) != 2 {
+		t.Fatalf("expected 2 items (clear + 1 model), got %d", len(items))
+	}
+	first, ok := items[0].(pickItem)
+	if !ok {
+		t.Fatal("first item should be a pickItem")
+	}
+	if first.value != "" {
+		t.Errorf("first item value should be empty (clear option), got %q", first.value)
+	}
+}
+
+func TestView_AssignmentsView_ShowsKeyHints(t *testing.T) {
+	state := &config.State{
+		Targets: []config.Target{{Name: "build", Kind: config.KindAgent}},
+	}
+	prefs := config.PreferencesConfig{TargetModels: map[string]string{}}
+	m := New(state, prefs)
+
+	rendered := m.View()
+	if !strings.Contains(rendered, "set model") {
+		t.Fatalf("expected 'set model' hint in view, got:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "d: clear") {
+		t.Fatalf("expected 'd: clear' hint in view, got:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "a: apply") {
+		t.Fatalf("expected 'a: apply' hint in view, got:\n%s", rendered)
+	}
 }

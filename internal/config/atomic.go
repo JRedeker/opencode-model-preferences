@@ -1,7 +1,7 @@
-// Package config — routing.go
+// Package config — atomic.go
 //
-// Shared utility for atomic file writes, used by SaveSlots and any future
-// config persistence that needs crash-safe writes.
+// Shared utility for atomic file writes, used by SavePreferences and any
+// future config persistence that needs crash-safe writes.
 package config
 
 import (
