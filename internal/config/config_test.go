@@ -958,3 +958,58 @@ func TestApplyPreferences_EmptyModelSkipsTarget(t *testing.T) {
 		t.Errorf("build model = %q, want existing/model (empty model should not overwrite)", got)
 	}
 }
+
+func TestApplyPreferences_ClearedModelRemovesFromConfig(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("OPENCODE_CONFIG_DIR", dir)
+
+	// opencode.json has a model set for build
+	initial := `{"agent": {"build": {"model": "old/model", "mode": "primary"}}}`
+	os.WriteFile(filepath.Join(dir, "opencode.json"), []byte(initial), 0644)
+
+	targets := []Target{{Name: "build", Kind: KindAgent}}
+	// Preferences has ClearedModels indicating build was explicitly cleared
+	pc := PreferencesConfig{
+		TargetModels:  map[string]string{},
+		ClearedModels: map[string]bool{"build": true},
+	}
+
+	if err := ApplyPreferences(pc, targets); err != nil {
+		t.Fatalf("ApplyPreferences() error: %v", err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(dir, "opencode.json"))
+	raw := string(data)
+	if gjson.Get(raw, "agent.build.model").Exists() {
+		t.Errorf("build model should be removed from config after clearing, got %q",
+			gjson.Get(raw, "agent.build.model").String())
+	}
+	// Other fields should be preserved
+	if !gjson.Get(raw, "agent.build.mode").Exists() {
+		t.Error("agent.build.mode should be preserved after clearing model")
+	}
+}
+
+func TestApplyPreferences_OverwritesExistingModel(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("OPENCODE_CONFIG_DIR", dir)
+
+	// opencode.json already has a model set for build
+	initial := `{"agent": {"build": {"model": "old/model"}}}`
+	os.WriteFile(filepath.Join(dir, "opencode.json"), []byte(initial), 0644)
+
+	targets := []Target{{Name: "build", Kind: KindAgent}}
+	pc := PreferencesConfig{
+		TargetModels: map[string]string{"build": "new/model"},
+	}
+
+	if err := ApplyPreferences(pc, targets); err != nil {
+		t.Fatalf("ApplyPreferences() error: %v", err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(dir, "opencode.json"))
+	got := gjson.Get(string(data), "agent.build.model").String()
+	if got != "new/model" {
+		t.Errorf("build model = %q, want new/model (overwrite should work)", got)
+	}
+}

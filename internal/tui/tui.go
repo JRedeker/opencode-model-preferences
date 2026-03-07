@@ -286,11 +286,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.prefs.TargetModels == nil {
 			m.prefs.TargetModels = make(map[string]string)
 		}
+		if m.prefs.ClearedModels == nil {
+			m.prefs.ClearedModels = make(map[string]bool)
+		}
 		if msg.cleared {
 			delete(m.prefs.TargetModels, msg.targetName)
+			m.prefs.ClearedModels[msg.targetName] = true
 			m.status = fmt.Sprintf("Cleared model for %s", msg.targetName)
 		} else {
 			m.prefs.TargetModels[msg.targetName] = msg.model
+			delete(m.prefs.ClearedModels, msg.targetName)
 			m.status = fmt.Sprintf("Set %s → %s", msg.targetName, msg.model)
 		}
 		m.view = viewAssignments
@@ -393,7 +398,11 @@ func (m Model) clearModel() (tea.Model, tea.Cmd) {
 	if m.prefs.TargetModels == nil {
 		m.prefs.TargetModels = make(map[string]string)
 	}
+	if m.prefs.ClearedModels == nil {
+		m.prefs.ClearedModels = make(map[string]bool)
+	}
 	delete(m.prefs.TargetModels, item.target.Name)
+	m.prefs.ClearedModels[item.target.Name] = true
 	m.status = fmt.Sprintf("Cleared model for %s", item.target.Name)
 	m.rebuildAssignmentList()
 	return m, m.savePrefsCmd()

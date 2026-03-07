@@ -71,7 +71,7 @@ The TUI groups targets into three sections:
 | `/` | Filter the list |
 | `q` / `ctrl+c` | Quit |
 
-> **Note:** Apply only writes to agents and commands that already have an entry in `opencode.json`. It does not create new agent entries.
+> **Note:** Apply only writes to agents and commands that already have an entry in `opencode.json`. It does not create new agent entries. Clearing a model and applying removes the `model` key from `opencode.json` while preserving other fields.
 
 ## Config format
 
@@ -84,9 +84,15 @@ Preferences are stored in `~/.config/opencode/omp-preferences.json` (separate fr
     "plan": "anthropic/claude-opus-4",
     "general": "anthropic/claude-sonnet-4",
     "explore": "anthropic/claude-haiku-4"
+  },
+  "cleared_models": {
+    "scout": true
   }
 }
 ```
+
+- `target_models` — maps each target to a model ID. Applying writes these to `opencode.json`.
+- `cleared_models` — tracks targets whose model was explicitly cleared. Applying **removes** the `model` key from `opencode.json` for these targets (other fields like `mode` are preserved).
 
 ## How it works
 

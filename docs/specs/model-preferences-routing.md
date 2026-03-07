@@ -13,20 +13,25 @@ Preferences are stored in `omp-preferences.json`:
   "target_models": {
     "build": "anthropic/claude-opus-4",
     "general": "anthropic/claude-haiku-4"
+  },
+  "cleared_models": {
+    "scout": true
   }
 }
 ```
 
-Each target (agent or command) maps directly to a model ID.
+- `target_models` — maps each target (agent or command) directly to a model ID.
+- `cleared_models` — tracks targets whose model was explicitly cleared by the user.
 
 ## Resolution
 
 When applying preferences, each target resolves as:
 
-1. If `target_models[target]` is non-empty, write that model to `opencode.json`.
-2. Else leave target unchanged.
+1. If `cleared_models[target]` is true, **delete** the `model` key from `opencode.json` (other fields preserved).
+2. If `target_models[target]` is non-empty, write that model to `opencode.json`.
+3. Else leave target unchanged.
 
-Only targets that already exist in `opencode.json` are written to.
+Only targets that already exist in `opencode.json` are written to. Assigning a new model to a previously cleared target removes it from `cleared_models`.
 
 ## TUI Sections
 

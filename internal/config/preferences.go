@@ -18,8 +18,11 @@ import (
 
 // PreferencesConfig holds per-target model assignments.
 // TargetModels maps each target name (agent or command) to a model ID.
+// ClearedModels tracks targets whose model was explicitly cleared by the user,
+// so ApplyPreferences can remove the model key from opencode.json.
 type PreferencesConfig struct {
-	TargetModels map[string]string `json:"target_models"`
+	TargetModels  map[string]string `json:"target_models"`
+	ClearedModels map[string]bool   `json:"cleared_models,omitempty"`
 }
 
 // PreferencesPath returns the path to omp-preferences.json, respecting
@@ -34,7 +37,8 @@ func LoadPreferences() (PreferencesConfig, error) {
 	data, err := os.ReadFile(PreferencesPath())
 	if os.IsNotExist(err) {
 		return PreferencesConfig{
-			TargetModels: make(map[string]string),
+			TargetModels:  make(map[string]string),
+			ClearedModels: make(map[string]bool),
 		}, nil
 	}
 	if err != nil {
@@ -46,6 +50,9 @@ func LoadPreferences() (PreferencesConfig, error) {
 	}
 	if pc.TargetModels == nil {
 		pc.TargetModels = make(map[string]string)
+	}
+	if pc.ClearedModels == nil {
+		pc.ClearedModels = make(map[string]bool)
 	}
 	return pc, nil
 }
@@ -62,8 +69,8 @@ func SavePreferences(pc PreferencesConfig) error {
 
 // ApplyPreferences writes model preferences to opencode.json for all targets
 // that have a model assignment in the preferences config. Targets without an
-// assignment are left unchanged. Only writes to targets that already exist in
-// opencode.json.
+// assignment are left unchanged unless explicitly cleared. Only writes to
+// targets that already exist in opencode.json.
 func ApplyPreferences(pc PreferencesConfig, targets []Target) error {
 	configPath := ConfigPath()
 	raw, err := os.ReadFile(configPath)
@@ -73,26 +80,32 @@ func ApplyPreferences(pc PreferencesConfig, targets []Target) error {
 
 	updated := raw
 	for _, t := range targets {
-		model, ok := pc.TargetModels[t.Name]
-		if !ok || model == "" {
+		var section string
+		if t.Kind == KindCommand {
+			section = "command"
+		} else {
+			section = "agent"
+		}
+
+		// Only touch targets that already exist in config.
+		if !gjson.GetBytes(raw, section+"."+t.Name).Exists() {
 			continue
 		}
 
-		var jsonPath string
-		if t.Kind == KindCommand {
-			jsonPath = "command." + t.Name + ".model"
-		} else {
-			jsonPath = "agent." + t.Name + ".model"
+		jsonPath := section + "." + t.Name + ".model"
+
+		// Explicitly cleared: remove the model key from opencode.json.
+		if pc.ClearedModels[t.Name] {
+			updated, err = sjson.DeleteBytes(updated, jsonPath)
+			if err != nil {
+				return fmt.Errorf("deleting %s: %w", jsonPath, err)
+			}
+			continue
 		}
 
-		// Only write if the target already exists in config.
-		var keyExists bool
-		if t.Kind == KindCommand {
-			keyExists = gjson.GetBytes(raw, "command."+t.Name).Exists()
-		} else {
-			keyExists = gjson.GetBytes(raw, "agent."+t.Name).Exists()
-		}
-		if !keyExists {
+		// Set model if assigned.
+		model, ok := pc.TargetModels[t.Name]
+		if !ok || model == "" {
 			continue
 		}
 
