@@ -77,26 +77,49 @@ func TestView_AssignmentsView_ShowsAssignedModel(t *testing.T) {
 	}
 }
 
-func TestBuildTargetItems_HiddenAgentsExcluded(t *testing.T) {
+func TestBuildTargetItems_HiddenAgentsInSubagentsSection(t *testing.T) {
 	targets := []config.Target{
 		{Name: "build", Kind: config.KindAgent},
-		{Name: "hidden-agent", Kind: config.KindAgent, Hidden: true},
+		{Name: "adv-reviewer", Kind: config.KindAgent, Hidden: true},
+		{Name: "adv-hardener", Kind: config.KindAgent, Hidden: true},
 	}
 	prefs := config.PreferencesConfig{
 		TargetModels: map[string]string{},
 	}
 	items := buildTargetItems(targets, prefs)
 
+	// Collect sections and which agents appear under each
+	var currentSection string
+	agentsBySection := make(map[string][]string)
 	for _, item := range items {
-		if ti, ok := item.(targetItem); ok && ti.target.Name == "hidden-agent" {
-			t.Error("hidden agent should not appear in target items")
+		if s, ok := item.(sectionItem); ok {
+			currentSection = s.label
+			continue
 		}
+		if ti, ok := item.(targetItem); ok {
+			agentsBySection[currentSection] = append(agentsBySection[currentSection], ti.target.Name)
+		}
+	}
+
+	// "build" should be under "Agents"
+	if agents := agentsBySection["Agents"]; len(agents) != 1 || agents[0] != "build" {
+		t.Errorf("Agents section = %v, want [build]", agents)
+	}
+
+	// hidden agents should be under "Sub-agents"
+	subs := agentsBySection["Sub-agents"]
+	if len(subs) != 2 {
+		t.Fatalf("Sub-agents section = %v, want [adv-reviewer, adv-hardener]", subs)
+	}
+	if subs[0] != "adv-reviewer" || subs[1] != "adv-hardener" {
+		t.Errorf("Sub-agents = %v, want [adv-reviewer, adv-hardener]", subs)
 	}
 }
 
-func TestBuildTargetItems_SeparatesAgentsAndCommands(t *testing.T) {
+func TestBuildTargetItems_SeparatesAgentsSubagentsAndCommands(t *testing.T) {
 	targets := []config.Target{
 		{Name: "build", Kind: config.KindAgent},
+		{Name: "adv-reviewer", Kind: config.KindAgent, Hidden: true},
 		{Name: "deploy", Kind: config.KindCommand},
 	}
 	prefs := config.PreferencesConfig{
@@ -110,8 +133,8 @@ func TestBuildTargetItems_SeparatesAgentsAndCommands(t *testing.T) {
 			sections = append(sections, s.label)
 		}
 	}
-	if len(sections) != 2 || sections[0] != "Agents" || sections[1] != "Commands" {
-		t.Errorf("expected [Agents, Commands] sections, got %v", sections)
+	if len(sections) != 3 || sections[0] != "Agents" || sections[1] != "Sub-agents" || sections[2] != "Commands" {
+		t.Errorf("expected [Agents, Sub-agents, Commands] sections, got %v", sections)
 	}
 }
 

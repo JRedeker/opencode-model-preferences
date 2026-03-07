@@ -28,6 +28,14 @@ When applying preferences, each target resolves as:
 
 Only targets that already exist in `opencode.json` are written to.
 
+## TUI Sections
+
+The TUI groups targets into three sections:
+
+- **Agents** — visible, user-facing agents
+- **Sub-agents** — agents with `hidden: true` (e.g. plugin sub-agents like `adv-researcher`). Not shown in OpenCode's Tab-cycle but configurable here.
+- **Commands** — slash commands with model overrides
+
 ## TUI Controls
 
 - `enter` / `m` — pick a model for the selected agent/command

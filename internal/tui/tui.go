@@ -91,16 +91,15 @@ func (p pickItem) FilterValue() string { return p.label }
 // -- Item builders -----------------------------------------------------------
 
 func buildTargetItems(targets []config.Target, prefs config.PreferencesConfig) []list.Item {
-	var agents, commands []list.Item
+	var agents, subagents, commands []list.Item
 	for _, t := range targets {
-		if t.Hidden {
-			continue
-		}
 		prefModel := prefs.TargetModels[t.Name]
 		hasChanged := prefModel != "" && prefModel != t.Model
 		item := targetItem{target: t, prefModel: prefModel, hasChanged: hasChanged}
 		if t.Kind == config.KindCommand {
 			commands = append(commands, item)
+		} else if t.Hidden {
+			subagents = append(subagents, item)
 		} else {
 			agents = append(agents, item)
 		}
@@ -109,6 +108,10 @@ func buildTargetItems(targets []config.Target, prefs config.PreferencesConfig) [
 	if len(agents) > 0 {
 		items = append(items, sectionItem{"Agents"})
 		items = append(items, agents...)
+	}
+	if len(subagents) > 0 {
+		items = append(items, sectionItem{"Sub-agents"})
+		items = append(items, subagents...)
 	}
 	if len(commands) > 0 {
 		items = append(items, sectionItem{"Commands"})

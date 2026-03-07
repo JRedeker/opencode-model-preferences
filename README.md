@@ -50,10 +50,16 @@ export OPEN_CHAD_OMP_POPUP_SIZE="120x40"    # absolute cells
 
 ### Flow
 
-1. Browse agents and commands — each shows its current model.
+1. Browse agents, sub-agents, and commands — each shows its current model.
 2. Press `enter` or `m` to pick a model for the selected target.
 3. Press `d` to clear a model assignment.
 4. Press `a` to apply all preferences to `opencode.json`.
+
+The TUI groups targets into three sections:
+
+- **Agents** — primary and user-facing agents (visible in OpenCode's Tab-cycle)
+- **Sub-agents** — hidden agents used internally by plugins (e.g. `adv-researcher`, `adv-reviewer`). These have `hidden: true` in their config and don't appear in OpenCode's Tab-cycle, but you can still set model preferences for them here.
+- **Commands** — slash commands with model overrides
 
 ### Keybinds
 
@@ -99,8 +105,8 @@ If the refresh fails, `omp` exits immediately with an actionable error:
 ### Agent discovery
 
 - **Built-in agents**: `build`, `plan` (primary, locked); `general`, `explore` (subagent)
-- **Markdown agents**: `~/.config/opencode/agents/*.md` and project `.opencode/agents/*.md` — `mode` from frontmatter determines classification
-- **JSON agents**: From `agent.*` keys in `opencode.json` (excludes system agents: `compaction`, `title`, `summary`)
+- **Markdown agents**: `~/.config/opencode/agents/*.md` and project `.opencode/agents/*.md` — `mode` and `hidden` from frontmatter determine classification
+- **JSON agents**: From `agent.*` keys in `opencode.json` (excludes system agents: `compaction`, `title`, `summary`). Agents with `"hidden": true` appear in the Sub-agents section.
 - **Commands**: From `command.*` keys in `opencode.json` and markdown command files
 
 ### Model discovery
