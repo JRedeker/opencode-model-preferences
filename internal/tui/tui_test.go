@@ -116,6 +116,35 @@ func TestBuildTargetItems_HiddenAgentsInSubagentsSection(t *testing.T) {
 	}
 }
 
+func TestBuildTargetItems_ModeSubagentsInSubagentsSection(t *testing.T) {
+	targets := []config.Target{
+		{Name: "build", Kind: config.KindAgent, Mode: "primary"},
+		{Name: "general", Kind: config.KindAgent, Mode: "subagent"},
+		{Name: "explore", Kind: config.KindAgent, Mode: "subagent"},
+	}
+	prefs := config.PreferencesConfig{TargetModels: map[string]string{}}
+	items := buildTargetItems(targets, prefs)
+
+	var currentSection string
+	sections := map[string][]string{}
+	for _, item := range items {
+		if s, ok := item.(sectionItem); ok {
+			currentSection = s.label
+			continue
+		}
+		if ti, ok := item.(targetItem); ok {
+			sections[currentSection] = append(sections[currentSection], ti.target.Name)
+		}
+	}
+
+	if got := sections["Agents"]; len(got) != 1 || got[0] != "build" {
+		t.Errorf("Agents section = %v, want [build]", got)
+	}
+	if got := sections["Sub-agents"]; len(got) != 2 || got[0] != "general" || got[1] != "explore" {
+		t.Errorf("Sub-agents section = %v, want [general explore]", got)
+	}
+}
+
 func TestBuildTargetItems_SeparatesAgentsSubagentsAndCommands(t *testing.T) {
 	targets := []config.Target{
 		{Name: "build", Kind: config.KindAgent},
@@ -185,6 +214,24 @@ func TestBuildTargetItems_PendingChangeShown(t *testing.T) {
 	t.Fatal("target item not found")
 }
 
+func TestBuildTargetItems_SubagentDescriptionShowsStickyOverride(t *testing.T) {
+	targets := []config.Target{{Name: "adv-reviewer", Kind: config.KindAgent, Hidden: true, Model: "anthropic/claude-haiku-4"}}
+	prefs := config.PreferencesConfig{TargetModels: map[string]string{}}
+
+	items := buildTargetItems(targets, prefs)
+	for _, item := range items {
+		ti, ok := item.(targetItem)
+		if !ok {
+			continue
+		}
+		if !strings.Contains(ti.Description(), "sticky override") {
+			t.Fatalf("expected sticky override description, got: %s", ti.Description())
+		}
+		return
+	}
+	t.Fatal("target item not found")
+}
+
 func TestBuildModelPickItems_IncludesClearOption(t *testing.T) {
 	models := []config.Model{
 		{ID: "anthropic/claude-opus-4", Provider: "anthropic", Name: "Claude Opus 4"},
@@ -219,5 +266,44 @@ func TestView_AssignmentsView_ShowsKeyHints(t *testing.T) {
 	}
 	if !strings.Contains(rendered, "a: apply") {
 		t.Fatalf("expected 'a: apply' hint in view, got:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "D: clear sub-agents") {
+		t.Fatalf("expected 'D: clear sub-agents' hint in view, got:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "sticky overrides") {
+		t.Fatalf("expected sticky override warning in view, got:\n%s", rendered)
+	}
+}
+
+func TestClearSubagentOverrides_ClearsOnlySubagents(t *testing.T) {
+	state := &config.State{Targets: []config.Target{
+		{Name: "build", Kind: config.KindAgent, Mode: "primary"},
+		{Name: "general", Kind: config.KindAgent, Mode: "subagent"},
+		{Name: "adv-reviewer", Kind: config.KindAgent, Hidden: true},
+	}}
+	prefs := config.PreferencesConfig{TargetModels: map[string]string{
+		"build":        "openai/gpt-5",
+		"general":      "anthropic/claude-haiku-4",
+		"adv-reviewer": "anthropic/claude-haiku-4",
+	}}
+	m := New(state, prefs)
+
+	updated, cmd := m.clearSubagentOverrides()
+	if cmd == nil {
+		t.Fatal("expected save command when clearing sub-agent overrides")
+	}
+	model := updated.(Model)
+
+	if got := model.prefs.TargetModels["build"]; got != "openai/gpt-5" {
+		t.Fatalf("build mapping = %q, want openai/gpt-5", got)
+	}
+	if _, ok := model.prefs.TargetModels["general"]; ok {
+		t.Fatal("general mapping should be cleared")
+	}
+	if _, ok := model.prefs.TargetModels["adv-reviewer"]; ok {
+		t.Fatal("adv-reviewer mapping should be cleared")
+	}
+	if !model.prefs.ClearedModels["general"] || !model.prefs.ClearedModels["adv-reviewer"] {
+		t.Fatalf("expected cleared models for sub-agents, got %#v", model.prefs.ClearedModels)
 	}
 }

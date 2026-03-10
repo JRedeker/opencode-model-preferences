@@ -53,12 +53,13 @@ export OPEN_CHAD_OMP_POPUP_SIZE="120x40"    # absolute cells
 1. Browse agents, sub-agents, and commands — each shows its current model.
 2. Press `enter` or `m` to pick a model for the selected target.
 3. Press `d` to clear a model assignment.
-4. Press `a` to apply all preferences to `opencode.json`.
+4. Press `D` to clear all sub-agent overrides when you need them to inherit again.
+5. Press `a` to apply all preferences to `opencode.json`.
 
 The TUI groups targets into three sections:
 
 - **Agents** — primary and user-facing agents (visible in OpenCode's Tab-cycle)
-- **Sub-agents** — hidden agents used internally by plugins (e.g. `adv-researcher`, `adv-reviewer`). These have `hidden: true` in their config and don't appear in OpenCode's Tab-cycle, but you can still set model preferences for them here.
+- **Sub-agents** — hidden or `mode: subagent` agents used internally by plugins and helper flows (e.g. `adv-researcher`, `adv-reviewer`, `general`, `explore`). These mappings are sticky overrides: changing your main agent model does not change them until you clear them.
 - **Commands** — slash commands with model overrides
 
 ### Keybinds
@@ -67,11 +68,14 @@ The TUI groups targets into three sections:
 |-----|--------|
 | `enter` / `m` | Pick model for selected agent/command |
 | `d` | Clear model assignment |
+| `D` | Clear all sub-agent overrides |
 | `a` | Apply preferences to opencode.json |
 | `/` | Filter the list |
 | `q` / `ctrl+c` | Quit |
 
 > **Note:** Apply only writes to agents and commands that already have an entry in `opencode.json`. It does not create new agent entries. Clearing a model and applying removes the `model` key from `opencode.json` while preserving other fields.
+
+> **Recovery tip:** If a hidden sub-agent is pinned to a provider that is rate-limited or unavailable, switching the main agent model will not help until you clear that sub-agent override. Press `D` in `omp`, then apply.
 
 ## Config format
 

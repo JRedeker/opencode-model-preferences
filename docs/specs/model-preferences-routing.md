@@ -38,13 +38,16 @@ Only targets that already exist in `opencode.json` are written to. Assigning a n
 The TUI groups targets into three sections:
 
 - **Agents** — visible, user-facing agents
-- **Sub-agents** — agents with `hidden: true` (e.g. plugin sub-agents like `adv-researcher`). Not shown in OpenCode's Tab-cycle but configurable here.
+- **Sub-agents** — agents with `mode: subagent` or `hidden: true` (e.g. plugin sub-agents like `adv-researcher`). Not shown in OpenCode's Tab-cycle in the same way as primary agents, but configurable here.
 - **Commands** — slash commands with model overrides
+
+Sub-agent mappings are sticky overrides. They do not automatically follow a main-agent model change. Clearing a sub-agent mapping returns it to inherited/default OpenCode routing.
 
 ## TUI Controls
 
 - `enter` / `m` — pick a model for the selected agent/command
 - `d` — clear model assignment
+- `D` — clear all sub-agent overrides
 - `a` — apply all preferences to `opencode.json`
 - `/` — filter the list
 - `q` — quit

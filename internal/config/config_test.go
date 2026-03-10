@@ -269,6 +269,27 @@ func TestDiscoverTargets_WithConfiguredAgent(t *testing.T) {
 	}
 }
 
+func TestTargetIsSubagent(t *testing.T) {
+	tests := []struct {
+		name   string
+		target Target
+		want   bool
+	}{
+		{name: "primary agent", target: Target{Kind: KindAgent, Mode: "primary"}, want: false},
+		{name: "mode subagent", target: Target{Kind: KindAgent, Mode: "subagent"}, want: true},
+		{name: "hidden subagent", target: Target{Kind: KindAgent, Hidden: true}, want: true},
+		{name: "command", target: Target{Kind: KindCommand, Mode: "subagent", Hidden: true}, want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.target.IsSubagent(); got != tt.want {
+				t.Fatalf("IsSubagent() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestDiscoverTargets_SystemAgentsExcluded(t *testing.T) {
 	raw := []byte(`{
 		"agent": {

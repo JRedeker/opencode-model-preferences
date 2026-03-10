@@ -63,14 +63,28 @@ func (t targetItem) Title() string { return t.target.Name }
 func (t targetItem) Description() string {
 	current := t.target.Model
 	if current == "" {
-		current = "(no model)"
+		if t.target.IsSubagent() {
+			current = "(inherits from calling agent/session)"
+		} else {
+			current = "(no model)"
+		}
 	}
 
 	if t.prefModel != "" {
 		if t.prefModel != t.target.Model {
-			return fmt.Sprintf("current: %s  → pending: %s", current, t.prefModel)
+			prefix := "current"
+			if t.target.IsSubagent() {
+				prefix = "sticky override"
+			}
+			return fmt.Sprintf("%s: %s  → pending: %s", prefix, current, t.prefModel)
+		}
+		if t.target.IsSubagent() {
+			return fmt.Sprintf("sticky override: %s", t.prefModel)
 		}
 		return fmt.Sprintf("model: %s", t.prefModel)
+	}
+	if t.target.IsSubagent() && t.target.Model != "" {
+		return fmt.Sprintf("sticky override: %s", current)
 	}
 	return fmt.Sprintf("model: %s", current)
 }
@@ -98,7 +112,7 @@ func buildTargetItems(targets []config.Target, prefs config.PreferencesConfig) [
 		item := targetItem{target: t, prefModel: prefModel, hasChanged: hasChanged}
 		if t.Kind == config.KindCommand {
 			commands = append(commands, item)
-		} else if t.Hidden {
+		} else if t.IsSubagent() {
 			subagents = append(subagents, item)
 		} else {
 			agents = append(agents, item)
@@ -338,6 +352,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, key.NewBinding(key.WithKeys("d"))):
 			return m.clearModel()
 
+		case key.Matches(msg, key.NewBinding(key.WithKeys("D"))):
+			return m.clearSubagentOverrides()
+
 		case key.Matches(msg, key.NewBinding(key.WithKeys("a"))):
 			return m.applyPreferences()
 		}
@@ -408,6 +425,34 @@ func (m Model) clearModel() (tea.Model, tea.Cmd) {
 	return m, m.savePrefsCmd()
 }
 
+func (m Model) clearSubagentOverrides() (tea.Model, tea.Cmd) {
+	if m.prefs.TargetModels == nil {
+		m.prefs.TargetModels = make(map[string]string)
+	}
+	if m.prefs.ClearedModels == nil {
+		m.prefs.ClearedModels = make(map[string]bool)
+	}
+
+	cleared := 0
+	for _, target := range m.state.Targets {
+		if !target.IsSubagent() {
+			continue
+		}
+		delete(m.prefs.TargetModels, target.Name)
+		m.prefs.ClearedModels[target.Name] = true
+		cleared++
+	}
+
+	if cleared == 0 {
+		m.status = "No sub-agent overrides to clear"
+		return m, nil
+	}
+
+	m.status = fmt.Sprintf("Cleared %d sub-agent override(s)", cleared)
+	m.rebuildAssignmentList()
+	return m, m.savePrefsCmd()
+}
+
 func (m Model) applyPreferences() (tea.Model, tea.Cmd) {
 	prefs := m.prefs
 	targets := m.state.Targets
@@ -441,7 +486,8 @@ func (m Model) View() string {
 		if m.status != "" {
 			content += "\n" + statusStyle.Render(m.status)
 		}
-		content += "\n" + faintStyle.Render("enter/m: set model  d: clear  a: apply to opencode.json  q: quit")
+		content += "\n" + faintStyle.Render("Sub-agent models are sticky overrides; press D to clear all sub-agent overrides.")
+		content += "\n" + faintStyle.Render("enter/m: set model  d: clear  D: clear sub-agents  a: apply to opencode.json  q: quit")
 
 	case viewPicker:
 		content = m.pickerList.View()

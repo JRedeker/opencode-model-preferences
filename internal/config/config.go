@@ -38,6 +38,12 @@ type Target struct {
 	Hidden      bool // true when frontmatter sets hidden: true
 }
 
+// IsSubagent reports whether the target should be treated as a sub-agent in the
+// TUI and recovery workflows.
+func (t Target) IsSubagent() bool {
+	return t.Kind == KindAgent && (t.Mode == "subagent" || t.Hidden)
+}
+
 // Model represents an available model from a provider.
 type Model struct {
 	Provider string
