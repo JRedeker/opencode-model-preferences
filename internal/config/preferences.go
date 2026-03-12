@@ -69,8 +69,8 @@ func SavePreferences(pc PreferencesConfig) error {
 
 // ApplyPreferences writes model preferences to opencode.json for all targets
 // that have a model assignment in the preferences config. Targets without an
-// assignment are left unchanged unless explicitly cleared. Only writes to
-// targets that already exist in opencode.json.
+// assignment are left unchanged unless explicitly cleared. Creates new entries
+// in opencode.json when a target has a model to set but no existing entry.
 func ApplyPreferences(pc PreferencesConfig, targets []Target) error {
 	configPath := ConfigPath()
 	raw, err := os.ReadFile(configPath)
@@ -87,15 +87,15 @@ func ApplyPreferences(pc PreferencesConfig, targets []Target) error {
 			section = "agent"
 		}
 
-		// Only touch targets that already exist in config.
-		if !gjson.GetBytes(raw, section+"."+t.Name).Exists() {
-			continue
-		}
-
+		existsInConfig := gjson.GetBytes(raw, section+"."+t.Name).Exists()
 		jsonPath := section + "." + t.Name + ".model"
 
 		// Explicitly cleared: remove the model key from opencode.json.
+		// Skip if the target doesn't exist in config — nothing to clear.
 		if pc.ClearedModels[t.Name] {
+			if !existsInConfig {
+				continue
+			}
 			updated, err = sjson.DeleteBytes(updated, jsonPath)
 			if err != nil {
 				return fmt.Errorf("deleting %s: %w", jsonPath, err)
@@ -103,7 +103,9 @@ func ApplyPreferences(pc PreferencesConfig, targets []Target) error {
 			continue
 		}
 
-		// Set model if assigned.
+		// Set model if assigned. sjson.SetBytes creates intermediate
+		// objects automatically, so targets not yet in opencode.json
+		// get a new entry with just the model field.
 		model, ok := pc.TargetModels[t.Name]
 		if !ok || model == "" {
 			continue

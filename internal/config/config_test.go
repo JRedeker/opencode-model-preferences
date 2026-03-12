@@ -901,7 +901,7 @@ func TestApplyPreferences_WritesModelToTargets(t *testing.T) {
 	}
 }
 
-func TestApplyPreferences_SkipsTargetNotInConfig(t *testing.T) {
+func TestApplyPreferences_CreatesEntryForTargetNotInConfig(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("OPENCODE_CONFIG_DIR", dir)
 
@@ -910,7 +910,7 @@ func TestApplyPreferences_SkipsTargetNotInConfig(t *testing.T) {
 
 	targets := []Target{
 		{Name: "build", Kind: KindAgent},
-		{Name: "plan", Kind: KindAgent}, // not in config
+		{Name: "plan", Kind: KindAgent}, // not in config yet
 	}
 	pc := PreferencesConfig{
 		TargetModels: map[string]string{
@@ -929,8 +929,40 @@ func TestApplyPreferences_SkipsTargetNotInConfig(t *testing.T) {
 	if gjson.Get(raw, "agent.build.model").String() != "anthropic/claude-opus-4" {
 		t.Errorf("build model should be set")
 	}
+	if gjson.Get(raw, "agent.plan.model").String() != "anthropic/claude-opus-4" {
+		t.Errorf("plan model = %q, want anthropic/claude-opus-4 (should create entry for target not in config)",
+			gjson.Get(raw, "agent.plan.model").String())
+	}
+}
+
+func TestApplyPreferences_ClearSkipsTargetNotInConfig(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("OPENCODE_CONFIG_DIR", dir)
+
+	initial := `{"agent": {"build": {"model": "old/model"}}}`
+	os.WriteFile(filepath.Join(dir, "opencode.json"), []byte(initial), 0644)
+
+	targets := []Target{
+		{Name: "build", Kind: KindAgent},
+		{Name: "plan", Kind: KindAgent}, // not in config
+	}
+	pc := PreferencesConfig{
+		TargetModels:  map[string]string{},
+		ClearedModels: map[string]bool{"build": true, "plan": true},
+	}
+
+	if err := ApplyPreferences(pc, targets); err != nil {
+		t.Fatalf("ApplyPreferences() error: %v", err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(dir, "opencode.json"))
+	raw := string(data)
+
+	if gjson.Get(raw, "agent.build.model").Exists() {
+		t.Errorf("build model should be removed")
+	}
 	if gjson.Get(raw, "agent.plan").Exists() {
-		t.Errorf("plan should not be added to config (not present)")
+		t.Errorf("plan should not be created when only clearing (not in config)")
 	}
 }
 
