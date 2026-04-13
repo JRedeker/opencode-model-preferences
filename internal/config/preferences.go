@@ -1,6 +1,6 @@
 // Package config — preferences.go
 //
-// Direct per-target model preferences. Each agent or command maps directly to
+// Direct per-target model preferences. Each agent or sub-agent maps directly to
 // a model ID with no intermediate abstraction. Config is stored in
 // ~/.config/opencode/omp-preferences.json (separate from opencode.json which
 // uses additionalProperties:false).
@@ -17,7 +17,7 @@ import (
 )
 
 // PreferencesConfig holds per-target model assignments.
-// TargetModels maps each target name (agent or command) to a model ID.
+// TargetModels maps each target name (agent or sub-agent) to a model ID.
 // ClearedModels tracks targets whose model was explicitly cleared by the user,
 // so ApplyPreferences can remove the model key from opencode.json.
 type PreferencesConfig struct {
@@ -80,15 +80,8 @@ func ApplyPreferences(pc PreferencesConfig, targets []Target) error {
 
 	updated := raw
 	for _, t := range targets {
-		var section string
-		if t.Kind == KindCommand {
-			section = "command"
-		} else {
-			section = "agent"
-		}
-
-		existsInConfig := gjson.GetBytes(raw, section+"."+t.Name).Exists()
-		jsonPath := section + "." + t.Name + ".model"
+		existsInConfig := gjson.GetBytes(raw, "agent."+t.Name).Exists()
+		jsonPath := "agent." + t.Name + ".model"
 
 		// Explicitly cleared: remove the model key from opencode.json.
 		// Skip if the target doesn't exist in config — nothing to clear.

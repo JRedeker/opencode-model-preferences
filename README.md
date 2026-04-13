@@ -2,7 +2,7 @@
 
 A TUI for managing per-agent model preferences in [OpenCode](https://github.com/anomalyco/opencode).
 
-Pick a model for each agent or command, then apply to write preferences to `opencode.json`.
+Pick a model for each agent or sub-agent, then apply to write preferences to `opencode.json`.
 
 ## Install
 
@@ -50,30 +50,29 @@ export OPEN_CHAD_OMP_POPUP_SIZE="120x40"    # absolute cells
 
 ### Flow
 
-1. Browse agents, sub-agents, and commands — each shows its current model.
+1. Browse agents and sub-agents — each shows its current model.
 2. Press `enter` or `m` to pick a model for the selected target.
 3. Press `d` to clear a model assignment.
 4. Press `D` to clear all sub-agent overrides when you need them to inherit again.
 5. Press `a` to apply all preferences to `opencode.json`.
 
-The TUI groups targets into three sections:
+The TUI groups targets into two sections:
 
 - **Agents** — primary and user-facing agents (visible in OpenCode's Tab-cycle)
 - **Sub-agents** — hidden or `mode: subagent` agents used internally by plugins and helper flows (e.g. `adv-researcher`, `adv-reviewer`, `general`, `explore`). These mappings are sticky overrides: changing your main agent model does not change them until you clear them.
-- **Commands** — slash commands with model overrides
 
 ### Keybinds
 
 | Key | Action |
 |-----|--------|
-| `enter` / `m` | Pick model for selected agent/command |
+| `enter` / `m` | Pick model for selected agent |
 | `d` | Clear model assignment |
 | `D` | Clear all sub-agent overrides |
 | `a` | Apply preferences to opencode.json |
 | `/` | Filter the list |
 | `q` / `ctrl+c` | Quit |
 
-> **Note:** Apply only writes to agents and commands that already have an entry in `opencode.json`. It does not create new agent entries. Clearing a model and applying removes the `model` key from `opencode.json` while preserving other fields.
+> **Note:** Apply only writes agent entries in `opencode.json`. Assigning a model can create a missing agent entry. Clearing a model removes only the `model` key while preserving other agent fields.
 
 > **Recovery tip:** If a hidden sub-agent is pinned to a provider that is rate-limited or unavailable, switching the main agent model will not help until you clear that sub-agent override. Press `D` in `omp`, then apply.
 
@@ -117,7 +116,6 @@ If the refresh fails, `omp` exits immediately with an actionable error:
 - **Built-in agents**: `build`, `plan` (primary, locked); `general`, `explore` (subagent)
 - **Markdown agents**: `~/.config/opencode/agents/*.md` and project `.opencode/agents/*.md` — `mode` and `hidden` from frontmatter determine classification
 - **JSON agents**: From `agent.*` keys in `opencode.json` (excludes system agents: `compaction`, `title`, `summary`). Agents with `"hidden": true` appear in the Sub-agents section.
-- **Commands**: From `command.*` keys in `opencode.json` and markdown command files
 
 ### Model discovery
 
@@ -128,7 +126,7 @@ CLI-first discovery via `opencode models` output, with fallback to `provider.*.m
 | Variable | Purpose |
 |----------|---------|
 | `OPENCODE_CONFIG_DIR` | Override config directory (default: `~/.config/opencode`) |
-| `OPENCODE_PROJECT_DIR` | Override project root used for `.opencode/agents` and `.opencode/commands` discovery |
+| `OPENCODE_PROJECT_DIR` | Override project root used for `.opencode/agents` discovery |
 | `OPEN_CHAD_OMP_POPUP_SIZE` | Override tmux popup size when launched via openchad (default: `80%x80%`) |
 
 ## Development

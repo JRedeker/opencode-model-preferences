@@ -1,6 +1,6 @@
 // Package config reads and writes OpenCode's global configuration.
 //
-// It discovers agents (built-in + markdown), commands, and available
+// It discovers agents (built-in + markdown) and available
 // models from the provider registry. Config writes use tidwall/sjson
 // for surgical JSON path updates that preserve formatting.
 package config
@@ -18,15 +18,14 @@ import (
 	"github.com/tidwall/sjson"
 )
 
-// TargetKind distinguishes agents from commands.
+// TargetKind classifies supported targets.
 type TargetKind string
 
 const (
-	KindAgent   TargetKind = "agent"
-	KindCommand TargetKind = "command"
+	KindAgent TargetKind = "agent"
 )
 
-// Target represents an agent or command that can have a model preference.
+// Target represents an agent that can have a model preference.
 type Target struct {
 	Name        string
 	Kind        TargetKind
@@ -168,7 +167,7 @@ func discoverModels(raw []byte) []Model {
 	return models
 }
 
-// discoverTargets finds all agents and commands from config + markdown files.
+// discoverTargets finds all agents from config + markdown files.
 func discoverTargets(configDir string, raw []byte) []Target {
 	seen := make(map[string]bool)
 	var targets []Target
@@ -209,23 +208,6 @@ func discoverTargets(configDir string, raw []byte) []Target {
 		return true
 	})
 
-	// JSON-configured commands
-	gjson.GetBytes(raw, "command").ForEach(func(name, val gjson.Result) bool {
-		n := name.String()
-		targets = append(targets, Target{
-			Name:  n,
-			Kind:  KindCommand,
-			Model: val.Get("model").String(),
-		})
-		seen["cmd:"+n] = true
-		return true
-	})
-
-	// Markdown commands: global + project
-	for _, dir := range listCommandDirs(configDir, projectDir) {
-		targets = append(targets, discoverMarkdownCommands(dir, raw, seen)...)
-	}
-
 	return targets
 }
 
@@ -233,14 +215,6 @@ func listAgentDirs(configDir, projectDir string) []string {
 	dirs := []string{filepath.Join(configDir, "agents")}
 	if projectDir != "" {
 		dirs = append(dirs, filepath.Join(projectDir, "agents"))
-	}
-	return dirs
-}
-
-func listCommandDirs(configDir, projectDir string) []string {
-	dirs := []string{filepath.Join(configDir, "commands")}
-	if projectDir != "" {
-		dirs = append(dirs, filepath.Join(projectDir, "commands"))
 	}
 	return dirs
 }
@@ -315,41 +289,6 @@ func discoverMarkdownAgents(dir string, raw []byte, seen map[string]bool) []Targ
 			Hidden:      hidden,
 		})
 		seen[name] = true
-	}
-
-	return targets
-}
-
-// discoverMarkdownCommands scans a directory for *.md command definitions.
-func discoverMarkdownCommands(dir string, raw []byte, seen map[string]bool) []Target {
-	var targets []Target
-
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return targets
-	}
-
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
-			continue
-		}
-		name := strings.TrimSuffix(e.Name(), ".md")
-		key := "cmd:" + name
-		if seen[key] {
-			continue
-		}
-
-		model := gjson.GetBytes(raw, "command."+name+".model").String()
-		if model == "" {
-			model = parseFrontmatterField(filepath.Join(dir, e.Name()), "model")
-		}
-
-		targets = append(targets, Target{
-			Name:  name,
-			Kind:  KindCommand,
-			Model: model,
-		})
-		seen[key] = true
 	}
 
 	return targets

@@ -145,11 +145,10 @@ func TestBuildTargetItems_ModeSubagentsInSubagentsSection(t *testing.T) {
 	}
 }
 
-func TestBuildTargetItems_SeparatesAgentsSubagentsAndCommands(t *testing.T) {
+func TestBuildTargetItems_SeparatesAgentsAndSubagents(t *testing.T) {
 	targets := []config.Target{
 		{Name: "build", Kind: config.KindAgent},
 		{Name: "adv-reviewer", Kind: config.KindAgent, Hidden: true},
-		{Name: "deploy", Kind: config.KindCommand},
 	}
 	prefs := config.PreferencesConfig{
 		TargetModels: map[string]string{},
@@ -162,8 +161,8 @@ func TestBuildTargetItems_SeparatesAgentsSubagentsAndCommands(t *testing.T) {
 			sections = append(sections, s.label)
 		}
 	}
-	if len(sections) != 3 || sections[0] != "Agents" || sections[1] != "Sub-agents" || sections[2] != "Commands" {
-		t.Errorf("expected [Agents, Sub-agents, Commands] sections, got %v", sections)
+	if len(sections) != 2 || sections[0] != "Agents" || sections[1] != "Sub-agents" {
+		t.Errorf("expected [Agents, Sub-agents] sections, got %v", sections)
 	}
 }
 

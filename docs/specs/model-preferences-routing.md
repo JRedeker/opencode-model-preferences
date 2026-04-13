@@ -20,7 +20,7 @@ Preferences are stored in `omp-preferences.json`:
 }
 ```
 
-- `target_models` — maps each target (agent or command) directly to a model ID.
+- `target_models` — maps each target (agent or sub-agent) directly to a model ID.
 - `cleared_models` — tracks targets whose model was explicitly cleared by the user.
 
 ## Resolution
@@ -35,17 +35,16 @@ Only targets that already exist in `opencode.json` are written to. Assigning a n
 
 ## TUI Sections
 
-The TUI groups targets into three sections:
+The TUI groups targets into two sections:
 
 - **Agents** — visible, user-facing agents
 - **Sub-agents** — agents with `mode: subagent` or `hidden: true` (e.g. plugin sub-agents like `adv-researcher`). Not shown in OpenCode's Tab-cycle in the same way as primary agents, but configurable here.
-- **Commands** — slash commands with model overrides
 
 Sub-agent mappings are sticky overrides. They do not automatically follow a main-agent model change. Clearing a sub-agent mapping returns it to inherited/default OpenCode routing.
 
 ## TUI Controls
 
-- `enter` / `m` — pick a model for the selected agent/command
+- `enter` / `m` — pick a model for the selected agent
 - `d` — clear model assignment
 - `D` — clear all sub-agent overrides
 - `a` — apply all preferences to `opencode.json`

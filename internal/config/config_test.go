@@ -278,7 +278,6 @@ func TestTargetIsSubagent(t *testing.T) {
 		{name: "primary agent", target: Target{Kind: KindAgent, Mode: "primary"}, want: false},
 		{name: "mode subagent", target: Target{Kind: KindAgent, Mode: "subagent"}, want: true},
 		{name: "hidden subagent", target: Target{Kind: KindAgent, Hidden: true}, want: true},
-		{name: "command", target: Target{Kind: KindCommand, Mode: "subagent", Hidden: true}, want: false},
 	}
 
 	for _, tt := range tests {
@@ -304,6 +303,22 @@ func TestDiscoverTargets_SystemAgentsExcluded(t *testing.T) {
 	for _, tgt := range targets {
 		if systemAgents[tgt.Name] {
 			t.Errorf("system agent %q should be excluded", tgt.Name)
+		}
+	}
+}
+
+func TestDiscoverTargets_IgnoresConfiguredCommands(t *testing.T) {
+	raw := []byte(`{
+		"command": {
+			"deploy": {"model": "anthropic/claude-opus-4"}
+		}
+	}`)
+
+	targets := discoverTargets("/nonexistent", raw)
+
+	for _, tgt := range targets {
+		if tgt.Name == "deploy" {
+			t.Fatal("deploy command should not be discovered as a target")
 		}
 	}
 }
@@ -815,7 +830,7 @@ func TestSavePreferences_RoundTrip(t *testing.T) {
 		TargetModels: map[string]string{
 			"build":   "anthropic/claude-opus-4",
 			"general": "anthropic/claude-haiku-4",
-			"deploy":  "openai/gpt-5",
+			"plan":    "openai/gpt-5",
 		},
 	}
 	if err := SavePreferences(pc); err != nil {
@@ -831,8 +846,8 @@ func TestSavePreferences_RoundTrip(t *testing.T) {
 	if loaded.TargetModels["general"] != "anthropic/claude-haiku-4" {
 		t.Errorf("general = %q, want anthropic/claude-haiku-4", loaded.TargetModels["general"])
 	}
-	if loaded.TargetModels["deploy"] != "openai/gpt-5" {
-		t.Errorf("deploy = %q, want openai/gpt-5", loaded.TargetModels["deploy"])
+	if loaded.TargetModels["plan"] != "openai/gpt-5" {
+		t.Errorf("plan = %q, want openai/gpt-5", loaded.TargetModels["plan"])
 	}
 }
 
@@ -855,7 +870,7 @@ func TestSavePreferences_AtomicWrite(t *testing.T) {
 	}
 }
 
-func TestApplyPreferences_WritesModelToTargets(t *testing.T) {
+func TestApplyPreferences_WritesModelToAgents(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("OPENCODE_CONFIG_DIR", dir)
 
@@ -863,9 +878,6 @@ func TestApplyPreferences_WritesModelToTargets(t *testing.T) {
   "agent": {
     "build": {"mode": "primary"},
     "general": {"mode": "subagent"}
-  },
-  "command": {
-    "deploy": {}
   }
 }`
 	os.WriteFile(filepath.Join(dir, "opencode.json"), []byte(initial), 0644)
@@ -873,13 +885,11 @@ func TestApplyPreferences_WritesModelToTargets(t *testing.T) {
 	targets := []Target{
 		{Name: "build", Kind: KindAgent},
 		{Name: "general", Kind: KindAgent},
-		{Name: "deploy", Kind: KindCommand},
 	}
 	pc := PreferencesConfig{
 		TargetModels: map[string]string{
 			"build":   "anthropic/claude-opus-4",
 			"general": "anthropic/claude-haiku-4",
-			"deploy":  "anthropic/claude-opus-4",
 		},
 	}
 
@@ -895,9 +905,6 @@ func TestApplyPreferences_WritesModelToTargets(t *testing.T) {
 	}
 	if gjson.Get(raw, "agent.general.model").String() != "anthropic/claude-haiku-4" {
 		t.Errorf("general model = %q, want anthropic/claude-haiku-4", gjson.Get(raw, "agent.general.model").String())
-	}
-	if gjson.Get(raw, "command.deploy.model").String() != "anthropic/claude-opus-4" {
-		t.Errorf("deploy model = %q, want anthropic/claude-opus-4", gjson.Get(raw, "command.deploy.model").String())
 	}
 }
 

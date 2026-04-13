@@ -1,12 +1,12 @@
 // Package tui implements the Bubbletea TUI for per-agent model preferences.
 //
 // Two views, using bubbles/list for consistent UX:
-//   - Assignments view: list of agents/commands with current model assignment.
+//   - Assignments view: list of agents with current model assignment.
 //     Press 'enter' or 'm' to pick a model, 'a' to apply to opencode.json,
 //     'd' to clear a model assignment.
 //   - Picker view: full list.Model for selecting a model, with filtering.
 //
-// Each agent/command maps directly to a model.
+// Each agent maps directly to a model.
 package tui
 
 import (
@@ -105,14 +105,15 @@ func (p pickItem) FilterValue() string { return p.label }
 // -- Item builders -----------------------------------------------------------
 
 func buildTargetItems(targets []config.Target, prefs config.PreferencesConfig) []list.Item {
-	var agents, subagents, commands []list.Item
+	var agents, subagents []list.Item
 	for _, t := range targets {
+		if t.Kind != config.KindAgent {
+			continue
+		}
 		prefModel := prefs.TargetModels[t.Name]
 		hasChanged := prefModel != "" && prefModel != t.Model
 		item := targetItem{target: t, prefModel: prefModel, hasChanged: hasChanged}
-		if t.Kind == config.KindCommand {
-			commands = append(commands, item)
-		} else if t.IsSubagent() {
+		if t.IsSubagent() {
 			subagents = append(subagents, item)
 		} else {
 			agents = append(agents, item)
@@ -126,10 +127,6 @@ func buildTargetItems(targets []config.Target, prefs config.PreferencesConfig) [
 	if len(subagents) > 0 {
 		items = append(items, sectionItem{"Sub-agents"})
 		items = append(items, subagents...)
-	}
-	if len(commands) > 0 {
-		items = append(items, sectionItem{"Commands"})
-		items = append(items, commands...)
 	}
 	return items
 }
@@ -206,7 +203,7 @@ func (d pickDelegate) Render(w io.Writer, m list.Model, index int, item list.Ite
 type viewState int
 
 const (
-	viewAssignments viewState = iota // agent/command list with model assignments
+	viewAssignments viewState = iota // agent list with model assignments
 	viewPicker                       // model picker
 )
 

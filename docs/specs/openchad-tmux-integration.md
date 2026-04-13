@@ -90,10 +90,10 @@ omp must treat user-initiated close actions (q, esc, ctrl+c) as graceful exits w
 **Preference changes apply on next invocation** (`rq-ompGracefulExit.3`)
 
 **Given:**
-- a user updates an agent or command model in omp
+- a user updates an agent or sub-agent model in omp
 - omp exits successfully
 
-**When:** the user invokes that agent or command in OpenCode
+**When:** the user invokes that agent or sub-agent flow in OpenCode
 
 **Then:**
 - the updated model preference is read from ~/.config/opencode/opencode.json
