@@ -47,6 +47,11 @@ var validAdvProviders = map[string]bool{
 	"adv-kimi":   true,
 }
 
+// ValidAdvProvider reports whether name is a recognized provider ADV variant.
+func ValidAdvProvider(name string) bool {
+	return validAdvProviders[name]
+}
+
 func sanitizePreferences(pc PreferencesConfig) (PreferencesConfig, bool) {
 	changed := false
 

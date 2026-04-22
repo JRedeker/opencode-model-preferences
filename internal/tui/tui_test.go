@@ -329,3 +329,118 @@ func TestBuildTargetItems_HidesUnmappedMainAgentsAndOverlays(t *testing.T) {
 		t.Fatalf("visible target names = %v, want [scout general]", names)
 	}
 }
+
+func TestBuildTargetItems_ShowsADVProviderAgentsSection(t *testing.T) {
+	targets := []config.Target{
+		{Name: "scout", Kind: config.KindAgent, Mode: "primary"},
+		{Name: "adv-claude", Kind: config.KindAgent, Mode: "primary"},
+		{Name: "adv-gpt", Kind: config.KindAgent, Mode: "primary"},
+	}
+	prefs := config.PreferencesConfig{AdvProviders: map[string]config.AdvProviderConfig{
+		"adv-claude": {Enabled: true},
+		"adv-gpt":    {Enabled: false},
+	}}
+	items := buildTargetItems(targets, prefs)
+
+	var sections []string
+	for _, item := range items {
+		if s, ok := item.(sectionItem); ok {
+			sections = append(sections, s.label)
+		}
+	}
+
+	found := false
+	for _, s := range sections {
+		if s == "ADV Provider Agents" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected 'ADV Provider Agents' section, got sections: %v", sections)
+	}
+}
+
+func TestBuildTargetItems_ProviderVariantShowsEnabledStatus(t *testing.T) {
+	targets := []config.Target{
+		{Name: "adv-claude", Kind: config.KindAgent, Mode: "primary"},
+	}
+	prefs := config.PreferencesConfig{AdvProviders: map[string]config.AdvProviderConfig{
+		"adv-claude": {Enabled: true, Model: "anthropic/claude-sonnet-4"},
+	}}
+	items := buildTargetItems(targets, prefs)
+
+	for _, item := range items {
+		ti, ok := item.(targetItem)
+		if !ok {
+			continue
+		}
+		if !strings.Contains(ti.Description(), "enabled") {
+			t.Fatalf("expected 'enabled' in description, got: %s", ti.Description())
+		}
+		return
+	}
+	t.Fatal("target item not found")
+}
+
+func TestBuildTargetItems_ProviderVariantShowsDisabledStatus(t *testing.T) {
+	targets := []config.Target{
+		{Name: "adv-gpt", Kind: config.KindAgent, Mode: "primary"},
+	}
+	prefs := config.PreferencesConfig{AdvProviders: map[string]config.AdvProviderConfig{
+		"adv-gpt": {Enabled: false},
+	}}
+	items := buildTargetItems(targets, prefs)
+
+	for _, item := range items {
+		ti, ok := item.(targetItem)
+		if !ok {
+			continue
+		}
+		if !strings.Contains(ti.Description(), "disabled") {
+			t.Fatalf("expected 'disabled' in description, got: %s", ti.Description())
+		}
+		return
+	}
+	t.Fatal("target item not found")
+}
+
+func TestUpdate_ToggleEnableProviderVariant(t *testing.T) {
+	state := &config.State{
+		Targets: []config.Target{
+			{Name: "adv-claude", Kind: config.KindAgent, Mode: "primary"},
+		},
+	}
+	prefs := config.PreferencesConfig{AdvProviders: map[string]config.AdvProviderConfig{
+		"adv-claude": {Enabled: false},
+	}}
+	m := New(state, prefs)
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 80})
+	m = updated.(Model)
+
+	// Navigate past section header to the provider item
+	m.assignmentList.Select(1)
+
+	// Press 'e' to toggle enable
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+	if cmd == nil {
+		t.Fatal("expected save command after toggling provider")
+	}
+	model := updated.(Model)
+	if !model.prefs.AdvProviders["adv-claude"].Enabled {
+		t.Fatal("expected adv-claude to be enabled after toggle")
+	}
+}
+
+func TestView_AssignmentsView_ShowsToggleHint(t *testing.T) {
+	state := &config.State{
+		Targets: []config.Target{{Name: "adv-claude", Kind: config.KindAgent, Mode: "primary"}},
+	}
+	prefs := config.PreferencesConfig{AdvProviders: map[string]config.AdvProviderConfig{}}
+	m := New(state, prefs)
+
+	rendered := m.View()
+	if !strings.Contains(rendered, "e: toggle enable/disable") {
+		t.Fatalf("expected 'e: toggle enable/disable' hint in view, got:\n%s", rendered)
+	}
+}

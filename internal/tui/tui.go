@@ -54,13 +54,26 @@ func (s sectionItem) FilterValue() string { return "" }
 
 // targetItem wraps a config.Target for the assignments list.
 type targetItem struct {
-	target     config.Target
-	prefModel  string // model from preferences, or ""
-	hasChanged bool   // true if prefModel differs from target.Model
+	target      config.Target
+	prefModel   string // model from preferences, or ""
+	hasChanged  bool   // true if prefModel differs from target.Model
+	advProvider *config.AdvProviderConfig // non-nil for provider ADV variants
 }
 
 func (t targetItem) Title() string { return t.target.Name }
 func (t targetItem) Description() string {
+	// Provider ADV variant display
+	if t.advProvider != nil {
+		status := "disabled"
+		if t.advProvider.Enabled {
+			status = "enabled"
+		}
+		if t.advProvider.Model != "" {
+			return fmt.Sprintf("%s  model: %s", status, t.advProvider.Model)
+		}
+		return status
+	}
+
 	current := t.target.Model
 	if current == "" {
 		if t.target.IsSubagent() {
@@ -105,11 +118,23 @@ func (p pickItem) FilterValue() string { return p.label }
 // -- Item builders -----------------------------------------------------------
 
 func buildTargetItems(targets []config.Target, prefs config.PreferencesConfig) []list.Item {
-	var agents, subagents []list.Item
+	var agents, subagents, providers []list.Item
 	for _, t := range targets {
 		if t.Kind != config.KindAgent || !t.IsModelMappable() {
 			continue
 		}
+
+		// Provider ADV variants go to their own section
+		if config.ValidAdvProvider(t.Name) {
+			cfg, ok := prefs.AdvProviders[t.Name]
+			if !ok {
+				cfg = config.AdvProviderConfig{Enabled: false}
+			}
+			item := targetItem{target: t, advProvider: &cfg}
+			providers = append(providers, item)
+			continue
+		}
+
 		prefModel := prefs.TargetModels[t.Name]
 		hasChanged := prefModel != "" && prefModel != t.Model
 		item := targetItem{target: t, prefModel: prefModel, hasChanged: hasChanged}
@@ -127,6 +152,10 @@ func buildTargetItems(targets []config.Target, prefs config.PreferencesConfig) [
 	if len(subagents) > 0 {
 		items = append(items, sectionItem{"Sub-agents"})
 		items = append(items, subagents...)
+	}
+	if len(providers) > 0 {
+		items = append(items, sectionItem{"ADV Provider Agents"})
+		items = append(items, providers...)
 	}
 	return items
 }
@@ -352,6 +381,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, key.NewBinding(key.WithKeys("D"))):
 			return m.clearSubagentOverrides()
 
+		case key.Matches(msg, key.NewBinding(key.WithKeys("e"))):
+			return m.toggleProvider()
+
 		case key.Matches(msg, key.NewBinding(key.WithKeys("a"))):
 			return m.applyPreferences()
 		}
@@ -450,6 +482,29 @@ func (m Model) clearSubagentOverrides() (tea.Model, tea.Cmd) {
 	return m, m.savePrefsCmd()
 }
 
+func (m Model) toggleProvider() (tea.Model, tea.Cmd) {
+	item, ok := m.assignmentList.SelectedItem().(targetItem)
+	if !ok || item.advProvider == nil {
+		return m, nil
+	}
+
+	if m.prefs.AdvProviders == nil {
+		m.prefs.AdvProviders = make(map[string]config.AdvProviderConfig)
+	}
+
+	cfg := m.prefs.AdvProviders[item.target.Name]
+	cfg.Enabled = !cfg.Enabled
+	m.prefs.AdvProviders[item.target.Name] = cfg
+
+	status := "disabled"
+	if cfg.Enabled {
+		status = "enabled"
+	}
+	m.status = fmt.Sprintf("%s %s", item.target.Name, status)
+	m.rebuildAssignmentList()
+	return m, m.savePrefsCmd()
+}
+
 func (m Model) applyPreferences() (tea.Model, tea.Cmd) {
 	prefs := m.prefs
 	targets := m.state.Targets
@@ -484,7 +539,7 @@ func (m Model) View() string {
 			content += "\n" + statusStyle.Render(m.status)
 		}
 		content += "\n" + faintStyle.Render("Sub-agent models are sticky overrides; press D to clear all sub-agent overrides.")
-		content += "\n" + faintStyle.Render("enter/m: set model  d: clear  D: clear sub-agents  a: apply to opencode.json  q: quit")
+		content += "\n" + faintStyle.Render("enter/m: set model  d: clear  D: clear sub-agents  e: toggle enable/disable  a: apply to opencode.json  q: quit")
 
 	case viewPicker:
 		content = m.pickerList.View()
