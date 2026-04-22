@@ -11,7 +11,6 @@ Preferences are stored in `omp-preferences.json`:
 ```json
 {
   "target_models": {
-    "build": "anthropic/claude-opus-4",
     "general": "anthropic/claude-haiku-4"
   },
   "cleared_models": {
@@ -23,6 +22,10 @@ Preferences are stored in `omp-preferences.json`:
 - `target_models` — maps each target (agent or sub-agent) directly to a model ID.
 - `cleared_models` — tracks targets whose model was explicitly cleared by the user.
 
+Main agents/overlays `build`, `adv`, and `plan` are intentionally excluded from direct mapping. They should follow current session model instead of getting pinned in `opencode.json`.
+
+If stale `build`, `adv`, or `plan` entries already exist in `omp-preferences.json`, `omp` removes them automatically on load/save.
+
 ## Resolution
 
 When applying preferences, each target resolves as:
@@ -30,6 +33,8 @@ When applying preferences, each target resolves as:
 1. If `cleared_models[target]` is true, **delete** the `model` key from `opencode.json` (other fields preserved).
 2. If `target_models[target]` is non-empty, write that model to `opencode.json`.
 3. Else leave target unchanged.
+
+For unmapped main agents/overlays (`build`, `adv`, `plan`), applying preferences always removes any direct `model` override from `opencode.json`.
 
 Only targets that already exist in `opencode.json` are written to. Assigning a new model to a previously cleared target removes it from `cleared_models`.
 
@@ -39,6 +44,8 @@ The TUI groups targets into two sections:
 
 - **Agents** — visible, user-facing agents
 - **Sub-agents** — agents with `mode: subagent` or `hidden: true` (e.g. plugin sub-agents like `adv-researcher`). Not shown in OpenCode's Tab-cycle in the same way as primary agents, but configurable here.
+
+`build`, `adv`, and `plan` do not appear in these configurable sections.
 
 Sub-agent mappings are sticky overrides. They do not automatically follow a main-agent model change. Clearing a sub-agent mapping returns it to inherited/default OpenCode routing.
 

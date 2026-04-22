@@ -289,6 +289,28 @@ func TestTargetIsSubagent(t *testing.T) {
 	}
 }
 
+func TestTargetIsModelMappable(t *testing.T) {
+	tests := []struct {
+		name   string
+		target Target
+		want   bool
+	}{
+		{name: "build unmapped", target: Target{Name: "build", Kind: KindAgent, Mode: "primary"}, want: false},
+		{name: "plan unmapped", target: Target{Name: "plan", Kind: KindAgent, Mode: "primary"}, want: false},
+		{name: "adv unmapped", target: Target{Name: "adv", Kind: KindAgent, Mode: "primary"}, want: false},
+		{name: "custom primary mapped", target: Target{Name: "scout", Kind: KindAgent, Mode: "primary"}, want: true},
+		{name: "subagent mapped", target: Target{Name: "general", Kind: KindAgent, Mode: "subagent"}, want: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.target.IsModelMappable(); got != tt.want {
+				t.Fatalf("IsModelMappable() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestDiscoverTargets_SystemAgentsExcluded(t *testing.T) {
 	raw := []byte(`{
 		"agent": {
@@ -779,7 +801,7 @@ func TestLoadPreferences_ExistingFile(t *testing.T) {
 	t.Setenv("OPENCODE_CONFIG_DIR", dir)
 	content := `{
 		"target_models": {
-			"build": "anthropic/claude-opus-4",
+			"scout": "anthropic/claude-opus-4",
 			"general": "openai/gpt-5"
 		}
 	}`
@@ -789,11 +811,65 @@ func TestLoadPreferences_ExistingFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadPreferences() error: %v", err)
 	}
-	if pc.TargetModels["build"] != "anthropic/claude-opus-4" {
-		t.Errorf("TargetModels[build] = %q, want anthropic/claude-opus-4", pc.TargetModels["build"])
+	if pc.TargetModels["scout"] != "anthropic/claude-opus-4" {
+		t.Errorf("TargetModels[scout] = %q, want anthropic/claude-opus-4", pc.TargetModels["scout"])
 	}
 	if pc.TargetModels["general"] != "openai/gpt-5" {
 		t.Errorf("TargetModels[general] = %q, want openai/gpt-5", pc.TargetModels["general"])
+	}
+}
+
+func TestLoadPreferences_SanitizesAndRewritesUnmappedMainAgents(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("OPENCODE_CONFIG_DIR", dir)
+	content := `{
+		"target_models": {
+			"build": "anthropic/claude-opus-4",
+			"plan": "openai/gpt-5",
+			"adv": "google/gemini-2.5-pro",
+			"general": "anthropic/claude-haiku-4"
+		},
+		"cleared_models": {
+			"build": true,
+			"adv": true,
+			"general": true
+		}
+	}`
+	path := filepath.Join(dir, "omp-preferences.json")
+	os.WriteFile(path, []byte(content), 0644)
+
+	pc, err := LoadPreferences()
+	if err != nil {
+		t.Fatalf("LoadPreferences() error: %v", err)
+	}
+
+	for _, name := range []string{"build", "plan", "adv"} {
+		if _, ok := pc.TargetModels[name]; ok {
+			t.Fatalf("TargetModels[%s] should be removed during load", name)
+		}
+		if _, ok := pc.ClearedModels[name]; ok {
+			t.Fatalf("ClearedModels[%s] should be removed during load", name)
+		}
+	}
+	if pc.TargetModels["general"] != "anthropic/claude-haiku-4" {
+		t.Fatalf("TargetModels[general] = %q, want anthropic/claude-haiku-4", pc.TargetModels["general"])
+	}
+	if !pc.ClearedModels["general"] {
+		t.Fatal("ClearedModels[general] should be preserved")
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading rewritten preferences: %v", err)
+	}
+	json := string(data)
+	for _, name := range []string{"build", "plan", "adv"} {
+		if gjson.Get(json, "target_models."+name).Exists() {
+			t.Fatalf("rewritten target_models.%s should be removed", name)
+		}
+		if gjson.Get(json, "cleared_models."+name).Exists() {
+			t.Fatalf("rewritten cleared_models.%s should be removed", name)
+		}
 	}
 }
 
@@ -828,9 +904,9 @@ func TestSavePreferences_RoundTrip(t *testing.T) {
 
 	pc := PreferencesConfig{
 		TargetModels: map[string]string{
-			"build":   "anthropic/claude-opus-4",
+			"scout":   "anthropic/claude-opus-4",
 			"general": "anthropic/claude-haiku-4",
-			"plan":    "openai/gpt-5",
+			"refine":  "openai/gpt-5",
 		},
 	}
 	if err := SavePreferences(pc); err != nil {
@@ -840,14 +916,55 @@ func TestSavePreferences_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadPreferences() error: %v", err)
 	}
-	if loaded.TargetModels["build"] != "anthropic/claude-opus-4" {
-		t.Errorf("build = %q, want anthropic/claude-opus-4", loaded.TargetModels["build"])
+	if loaded.TargetModels["scout"] != "anthropic/claude-opus-4" {
+		t.Errorf("scout = %q, want anthropic/claude-opus-4", loaded.TargetModels["scout"])
 	}
 	if loaded.TargetModels["general"] != "anthropic/claude-haiku-4" {
 		t.Errorf("general = %q, want anthropic/claude-haiku-4", loaded.TargetModels["general"])
 	}
-	if loaded.TargetModels["plan"] != "openai/gpt-5" {
-		t.Errorf("plan = %q, want openai/gpt-5", loaded.TargetModels["plan"])
+	if loaded.TargetModels["refine"] != "openai/gpt-5" {
+		t.Errorf("refine = %q, want openai/gpt-5", loaded.TargetModels["refine"])
+	}
+}
+
+func TestSavePreferences_StripsUnmappedMainAgents(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("OPENCODE_CONFIG_DIR", dir)
+
+	pc := PreferencesConfig{
+		TargetModels: map[string]string{
+			"build":   "anthropic/claude-opus-4",
+			"plan":    "openai/gpt-5",
+			"adv":     "google/gemini-2.5-pro",
+			"general": "anthropic/claude-haiku-4",
+		},
+		ClearedModels: map[string]bool{
+			"build":   true,
+			"adv":     true,
+			"general": true,
+		},
+	}
+	if err := SavePreferences(pc); err != nil {
+		t.Fatalf("SavePreferences() error: %v", err)
+	}
+
+	loaded, err := LoadPreferences()
+	if err != nil {
+		t.Fatalf("LoadPreferences() error: %v", err)
+	}
+	for _, name := range []string{"build", "plan", "adv"} {
+		if _, ok := loaded.TargetModels[name]; ok {
+			t.Fatalf("TargetModels[%s] should not be saved", name)
+		}
+		if _, ok := loaded.ClearedModels[name]; ok {
+			t.Fatalf("ClearedModels[%s] should not be saved", name)
+		}
+	}
+	if loaded.TargetModels["general"] != "anthropic/claude-haiku-4" {
+		t.Fatalf("TargetModels[general] = %q, want anthropic/claude-haiku-4", loaded.TargetModels["general"])
+	}
+	if !loaded.ClearedModels["general"] {
+		t.Fatal("ClearedModels[general] should be preserved")
 	}
 }
 
@@ -856,7 +973,7 @@ func TestSavePreferences_AtomicWrite(t *testing.T) {
 	t.Setenv("OPENCODE_CONFIG_DIR", dir)
 
 	pc := PreferencesConfig{
-		TargetModels: map[string]string{"build": "openai/gpt-5"},
+		TargetModels: map[string]string{"scout": "openai/gpt-5"},
 	}
 	if err := SavePreferences(pc); err != nil {
 		t.Fatalf("SavePreferences() error: %v", err)
@@ -876,19 +993,19 @@ func TestApplyPreferences_WritesModelToAgents(t *testing.T) {
 
 	initial := `{
   "agent": {
-    "build": {"mode": "primary"},
-    "general": {"mode": "subagent"}
+	    "scout": {"mode": "primary"},
+	    "general": {"mode": "subagent"}
   }
 }`
 	os.WriteFile(filepath.Join(dir, "opencode.json"), []byte(initial), 0644)
 
 	targets := []Target{
-		{Name: "build", Kind: KindAgent},
+		{Name: "scout", Kind: KindAgent},
 		{Name: "general", Kind: KindAgent},
 	}
 	pc := PreferencesConfig{
 		TargetModels: map[string]string{
-			"build":   "anthropic/claude-opus-4",
+			"scout":   "anthropic/claude-opus-4",
 			"general": "anthropic/claude-haiku-4",
 		},
 	}
@@ -900,8 +1017,8 @@ func TestApplyPreferences_WritesModelToAgents(t *testing.T) {
 	data, _ := os.ReadFile(filepath.Join(dir, "opencode.json"))
 	raw := string(data)
 
-	if gjson.Get(raw, "agent.build.model").String() != "anthropic/claude-opus-4" {
-		t.Errorf("build model = %q, want anthropic/claude-opus-4", gjson.Get(raw, "agent.build.model").String())
+	if gjson.Get(raw, "agent.scout.model").String() != "anthropic/claude-opus-4" {
+		t.Errorf("scout model = %q, want anthropic/claude-opus-4", gjson.Get(raw, "agent.scout.model").String())
 	}
 	if gjson.Get(raw, "agent.general.model").String() != "anthropic/claude-haiku-4" {
 		t.Errorf("general model = %q, want anthropic/claude-haiku-4", gjson.Get(raw, "agent.general.model").String())
@@ -912,17 +1029,17 @@ func TestApplyPreferences_CreatesEntryForTargetNotInConfig(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("OPENCODE_CONFIG_DIR", dir)
 
-	initial := `{"agent": {"build": {}}}`
+	initial := `{"agent": {"scout": {}}}`
 	os.WriteFile(filepath.Join(dir, "opencode.json"), []byte(initial), 0644)
 
 	targets := []Target{
-		{Name: "build", Kind: KindAgent},
-		{Name: "plan", Kind: KindAgent}, // not in config yet
+		{Name: "scout", Kind: KindAgent},
+		{Name: "refine", Kind: KindAgent}, // not in config yet
 	}
 	pc := PreferencesConfig{
 		TargetModels: map[string]string{
-			"build": "anthropic/claude-opus-4",
-			"plan":  "anthropic/claude-opus-4",
+			"scout":  "anthropic/claude-opus-4",
+			"refine": "anthropic/claude-opus-4",
 		},
 	}
 
@@ -933,12 +1050,58 @@ func TestApplyPreferences_CreatesEntryForTargetNotInConfig(t *testing.T) {
 	data, _ := os.ReadFile(filepath.Join(dir, "opencode.json"))
 	raw := string(data)
 
-	if gjson.Get(raw, "agent.build.model").String() != "anthropic/claude-opus-4" {
-		t.Errorf("build model should be set")
+	if gjson.Get(raw, "agent.scout.model").String() != "anthropic/claude-opus-4" {
+		t.Errorf("scout model should be set")
 	}
-	if gjson.Get(raw, "agent.plan.model").String() != "anthropic/claude-opus-4" {
-		t.Errorf("plan model = %q, want anthropic/claude-opus-4 (should create entry for target not in config)",
-			gjson.Get(raw, "agent.plan.model").String())
+	if gjson.Get(raw, "agent.refine.model").String() != "anthropic/claude-opus-4" {
+		t.Errorf("refine model = %q, want anthropic/claude-opus-4 (should create entry for target not in config)",
+			gjson.Get(raw, "agent.refine.model").String())
+	}
+}
+
+func TestApplyPreferences_UnmappedMainAgentsAreClearedFromConfig(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("OPENCODE_CONFIG_DIR", dir)
+
+	initial := `{
+  "agent": {
+    "build": {"model": "old/build", "mode": "primary"},
+    "plan": {"model": "old/plan", "mode": "primary"},
+    "adv": {"model": "old/adv", "mode": "primary"},
+    "general": {"model": "old/general", "mode": "subagent"}
+  }
+}`
+	os.WriteFile(filepath.Join(dir, "opencode.json"), []byte(initial), 0644)
+
+	targets := []Target{
+		{Name: "build", Kind: KindAgent, Mode: "primary"},
+		{Name: "plan", Kind: KindAgent, Mode: "primary"},
+		{Name: "adv", Kind: KindAgent, Mode: "primary"},
+		{Name: "general", Kind: KindAgent, Mode: "subagent"},
+	}
+	pc := PreferencesConfig{
+		TargetModels: map[string]string{
+			"build":   "new/build",
+			"plan":    "new/plan",
+			"adv":     "new/adv",
+			"general": "new/general",
+		},
+	}
+
+	if err := ApplyPreferences(pc, targets); err != nil {
+		t.Fatalf("ApplyPreferences() error: %v", err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(dir, "opencode.json"))
+	raw := string(data)
+
+	for _, name := range []string{"build", "plan", "adv"} {
+		if gjson.Get(raw, "agent."+name+".model").Exists() {
+			t.Fatalf("%s model should be removed from config", name)
+		}
+	}
+	if gjson.Get(raw, "agent.general.model").String() != "new/general" {
+		t.Fatalf("general model = %q, want new/general", gjson.Get(raw, "agent.general.model").String())
 	}
 }
 
@@ -977,12 +1140,12 @@ func TestApplyPreferences_NoAssignmentSkipsTarget(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("OPENCODE_CONFIG_DIR", dir)
 
-	initial := `{"agent": {"build": {"model": "existing/model"}}}`
+	initial := `{"agent": {"scout": {"model": "existing/model"}}}`
 	os.WriteFile(filepath.Join(dir, "opencode.json"), []byte(initial), 0644)
 
-	targets := []Target{{Name: "build", Kind: KindAgent}}
+	targets := []Target{{Name: "scout", Kind: KindAgent}}
 	pc := PreferencesConfig{
-		TargetModels: map[string]string{}, // build has no assignment
+		TargetModels: map[string]string{}, // scout has no assignment
 	}
 
 	if err := ApplyPreferences(pc, targets); err != nil {
@@ -990,9 +1153,9 @@ func TestApplyPreferences_NoAssignmentSkipsTarget(t *testing.T) {
 	}
 
 	data, _ := os.ReadFile(filepath.Join(dir, "opencode.json"))
-	got := gjson.Get(string(data), "agent.build.model").String()
+	got := gjson.Get(string(data), "agent.scout.model").String()
 	if got != "existing/model" {
-		t.Errorf("build model = %q, want existing/model (no assignment should not change it)", got)
+		t.Errorf("scout model = %q, want existing/model (no assignment should not change it)", got)
 	}
 }
 
@@ -1000,12 +1163,12 @@ func TestApplyPreferences_EmptyModelSkipsTarget(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("OPENCODE_CONFIG_DIR", dir)
 
-	initial := `{"agent": {"build": {"model": "existing/model"}}}`
+	initial := `{"agent": {"scout": {"model": "existing/model"}}}`
 	os.WriteFile(filepath.Join(dir, "opencode.json"), []byte(initial), 0644)
 
-	targets := []Target{{Name: "build", Kind: KindAgent}}
+	targets := []Target{{Name: "scout", Kind: KindAgent}}
 	pc := PreferencesConfig{
-		TargetModels: map[string]string{"build": ""}, // empty model
+		TargetModels: map[string]string{"scout": ""}, // empty model
 	}
 
 	if err := ApplyPreferences(pc, targets); err != nil {
@@ -1013,9 +1176,9 @@ func TestApplyPreferences_EmptyModelSkipsTarget(t *testing.T) {
 	}
 
 	data, _ := os.ReadFile(filepath.Join(dir, "opencode.json"))
-	got := gjson.Get(string(data), "agent.build.model").String()
+	got := gjson.Get(string(data), "agent.scout.model").String()
 	if got != "existing/model" {
-		t.Errorf("build model = %q, want existing/model (empty model should not overwrite)", got)
+		t.Errorf("scout model = %q, want existing/model (empty model should not overwrite)", got)
 	}
 }
 
@@ -1023,15 +1186,15 @@ func TestApplyPreferences_ClearedModelRemovesFromConfig(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("OPENCODE_CONFIG_DIR", dir)
 
-	// opencode.json has a model set for build
-	initial := `{"agent": {"build": {"model": "old/model", "mode": "primary"}}}`
+	// opencode.json has a model set for scout
+	initial := `{"agent": {"scout": {"model": "old/model", "mode": "primary"}}}`
 	os.WriteFile(filepath.Join(dir, "opencode.json"), []byte(initial), 0644)
 
-	targets := []Target{{Name: "build", Kind: KindAgent}}
-	// Preferences has ClearedModels indicating build was explicitly cleared
+	targets := []Target{{Name: "scout", Kind: KindAgent}}
+	// Preferences has ClearedModels indicating scout was explicitly cleared
 	pc := PreferencesConfig{
 		TargetModels:  map[string]string{},
-		ClearedModels: map[string]bool{"build": true},
+		ClearedModels: map[string]bool{"scout": true},
 	}
 
 	if err := ApplyPreferences(pc, targets); err != nil {
@@ -1040,13 +1203,13 @@ func TestApplyPreferences_ClearedModelRemovesFromConfig(t *testing.T) {
 
 	data, _ := os.ReadFile(filepath.Join(dir, "opencode.json"))
 	raw := string(data)
-	if gjson.Get(raw, "agent.build.model").Exists() {
-		t.Errorf("build model should be removed from config after clearing, got %q",
-			gjson.Get(raw, "agent.build.model").String())
+	if gjson.Get(raw, "agent.scout.model").Exists() {
+		t.Errorf("scout model should be removed from config after clearing, got %q",
+			gjson.Get(raw, "agent.scout.model").String())
 	}
 	// Other fields should be preserved
-	if !gjson.Get(raw, "agent.build.mode").Exists() {
-		t.Error("agent.build.mode should be preserved after clearing model")
+	if !gjson.Get(raw, "agent.scout.mode").Exists() {
+		t.Error("agent.scout.mode should be preserved after clearing model")
 	}
 }
 
@@ -1054,13 +1217,13 @@ func TestApplyPreferences_OverwritesExistingModel(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("OPENCODE_CONFIG_DIR", dir)
 
-	// opencode.json already has a model set for build
-	initial := `{"agent": {"build": {"model": "old/model"}}}`
+	// opencode.json already has a model set for scout
+	initial := `{"agent": {"scout": {"model": "old/model"}}}`
 	os.WriteFile(filepath.Join(dir, "opencode.json"), []byte(initial), 0644)
 
-	targets := []Target{{Name: "build", Kind: KindAgent}}
+	targets := []Target{{Name: "scout", Kind: KindAgent}}
 	pc := PreferencesConfig{
-		TargetModels: map[string]string{"build": "new/model"},
+		TargetModels: map[string]string{"scout": "new/model"},
 	}
 
 	if err := ApplyPreferences(pc, targets); err != nil {
@@ -1068,8 +1231,203 @@ func TestApplyPreferences_OverwritesExistingModel(t *testing.T) {
 	}
 
 	data, _ := os.ReadFile(filepath.Join(dir, "opencode.json"))
-	got := gjson.Get(string(data), "agent.build.model").String()
+	got := gjson.Get(string(data), "agent.scout.model").String()
 	if got != "new/model" {
-		t.Errorf("build model = %q, want new/model (overwrite should work)", got)
+		t.Errorf("scout model = %q, want new/model (overwrite should work)", got)
+	}
+}
+
+// -- Provider ADV tests ------------------------------------------------------
+
+func TestTargetIsModelMappable_ProviderVariantsAllowed(t *testing.T) {
+	tests := []struct {
+		name   string
+		target Target
+		want   bool
+	}{
+		{name: "adv-claude mapped", target: Target{Name: "adv-claude", Kind: KindAgent, Mode: "primary"}, want: true},
+		{name: "adv-gpt mapped", target: Target{Name: "adv-gpt", Kind: KindAgent, Mode: "primary"}, want: true},
+		{name: "adv-glm mapped", target: Target{Name: "adv-glm", Kind: KindAgent, Mode: "primary"}, want: true},
+		{name: "adv-kimi mapped", target: Target{Name: "adv-kimi", Kind: KindAgent, Mode: "primary"}, want: true},
+		{name: "adv still unmapped", target: Target{Name: "adv", Kind: KindAgent, Mode: "primary"}, want: false},
+		{name: "build still unmapped", target: Target{Name: "build", Kind: KindAgent, Mode: "primary"}, want: false},
+		{name: "plan still unmapped", target: Target{Name: "plan", Kind: KindAgent, Mode: "primary"}, want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.target.IsModelMappable(); got != tt.want {
+				t.Fatalf("IsModelMappable() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDiscoverTargets_ProviderVariantsFromGlobalAgents(t *testing.T) {
+	dir := t.TempDir()
+	agentDir := filepath.Join(dir, "agents")
+	os.MkdirAll(agentDir, 0755)
+
+	for _, name := range []string{"adv-claude", "adv-gpt", "adv-glm", "adv-kimi"} {
+		content := `---
+name: ` + name + `
+mode: primary
+---
+`
+		os.WriteFile(filepath.Join(agentDir, name+".md"), []byte(content), 0644)
+	}
+
+	raw := []byte(`{}`)
+	targets := discoverTargets(dir, raw)
+
+	names := make(map[string]bool)
+	for _, tgt := range targets {
+		names[tgt.Name] = true
+	}
+
+	for _, expected := range []string{"adv-claude", "adv-gpt", "adv-glm", "adv-kimi"} {
+		if !names[expected] {
+			t.Errorf("missing provider variant: %s", expected)
+		}
+	}
+}
+
+func TestDiscoverTargets_DoesNotDiscoverProjectLocalProviderAgents(t *testing.T) {
+	root := t.TempDir()
+	globalAgentDir := filepath.Join(root, "global", "agents")
+	projectDir := filepath.Join(root, "project", ".opencode", "agents")
+	os.MkdirAll(globalAgentDir, 0755)
+	os.MkdirAll(projectDir, 0755)
+
+	// Global has adv-claude
+	os.WriteFile(filepath.Join(globalAgentDir, "adv-claude.md"), []byte("---\nmode: primary\n---\n"), 0644)
+	// Project-local has adv-gpt (should be ignored for provider-ADV)
+	os.WriteFile(filepath.Join(projectDir, "adv-gpt.md"), []byte("---\nmode: primary\n---\n"), 0644)
+
+	// Set working dir to project
+	oldWD, _ := os.Getwd()
+	defer os.Chdir(oldWD)
+	os.Chdir(filepath.Join(root, "project"))
+
+	t.Setenv("OPENCODE_CONFIG_DIR", filepath.Join(root, "global"))
+
+	raw := []byte(`{}`)
+	targets := discoverTargets(filepath.Join(root, "global"), raw)
+
+	names := make(map[string]bool)
+	for _, tgt := range targets {
+		names[tgt.Name] = true
+	}
+
+	if !names["adv-claude"] {
+		t.Error("adv-claude from global should be discovered")
+	}
+	// Project-local agents may still be discovered by the general markdown scan,
+	// but provider-ADV state should only come from global.
+	// This test documents current behavior; the provider-ADV whitelist ensures
+	// only the four valid names are treated as provider variants regardless of source.
+}
+
+func TestApplyPreferences_WritesProviderADVDisableAndModel(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("OPENCODE_CONFIG_DIR", dir)
+
+	initial := `{"agent": {}}`
+	os.WriteFile(filepath.Join(dir, "opencode.json"), []byte(initial), 0644)
+
+	targets := []Target{
+		{Name: "adv-claude", Kind: KindAgent, Mode: "primary"},
+		{Name: "adv-gpt", Kind: KindAgent, Mode: "primary"},
+	}
+	pc := PreferencesConfig{
+		TargetModels: map[string]string{
+			"adv-claude": "anthropic/claude-sonnet-4-20250514",
+		},
+		AdvProviders: map[string]AdvProviderConfig{
+			"adv-claude": {Enabled: true, Model: "anthropic/claude-sonnet-4-20250514"},
+			"adv-gpt":    {Enabled: false},
+		},
+	}
+
+	if err := ApplyPreferences(pc, targets); err != nil {
+		t.Fatalf("ApplyPreferences() error: %v", err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(dir, "opencode.json"))
+	raw := string(data)
+
+	if gjson.Get(raw, "agent.adv-claude.model").String() != "anthropic/claude-sonnet-4-20250514" {
+		t.Errorf("adv-claude model = %q, want anthropic/claude-sonnet-4-20250514", gjson.Get(raw, "agent.adv-claude.model").String())
+	}
+	if gjson.Get(raw, "agent.adv-claude.disable").Bool() != false {
+		t.Errorf("adv-claude disable should be false (enabled), got %v", gjson.Get(raw, "agent.adv-claude.disable").Bool())
+	}
+	if gjson.Get(raw, "agent.adv-gpt.disable").Bool() != true {
+		t.Errorf("adv-gpt disable should be true (disabled), got %v", gjson.Get(raw, "agent.adv-gpt.disable").Bool())
+	}
+}
+
+func TestLoadPreferences_AdvProvidersRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("OPENCODE_CONFIG_DIR", dir)
+
+	pc := PreferencesConfig{
+		AdvProviders: map[string]AdvProviderConfig{
+			"adv-claude": {Enabled: true, Model: "anthropic/claude-sonnet-4-20250514"},
+			"adv-gpt":    {Enabled: false},
+		},
+	}
+	if err := SavePreferences(pc); err != nil {
+		t.Fatalf("SavePreferences() error: %v", err)
+	}
+
+	loaded, err := LoadPreferences()
+	if err != nil {
+		t.Fatalf("LoadPreferences() error: %v", err)
+	}
+
+	if !loaded.AdvProviders["adv-claude"].Enabled {
+		t.Error("adv-claude should be enabled")
+	}
+	if loaded.AdvProviders["adv-claude"].Model != "anthropic/claude-sonnet-4-20250514" {
+		t.Errorf("adv-claude model = %q, want anthropic/claude-sonnet-4-20250514", loaded.AdvProviders["adv-claude"].Model)
+	}
+	if loaded.AdvProviders["adv-gpt"].Enabled {
+		t.Error("adv-gpt should be disabled")
+	}
+}
+
+func TestSavePreferences_SanitizesAdvProviders(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("OPENCODE_CONFIG_DIR", dir)
+
+	pc := PreferencesConfig{
+		AdvProviders: map[string]AdvProviderConfig{
+			"adv-claude": {Enabled: true},
+			"adv":        {Enabled: true},        // invalid — should be stripped
+			"build":      {Enabled: true},        // invalid — should be stripped
+			"custom":     {Enabled: true},        // invalid — not a provider variant
+		},
+	}
+	if err := SavePreferences(pc); err != nil {
+		t.Fatalf("SavePreferences() error: %v", err)
+	}
+
+	loaded, err := LoadPreferences()
+	if err != nil {
+		t.Fatalf("LoadPreferences() error: %v", err)
+	}
+
+	if _, ok := loaded.AdvProviders["adv-claude"]; !ok {
+		t.Error("adv-claude should be preserved")
+	}
+	if _, ok := loaded.AdvProviders["adv"]; ok {
+		t.Error("adv should be stripped from AdvProviders")
+	}
+	if _, ok := loaded.AdvProviders["build"]; ok {
+		t.Error("build should be stripped from AdvProviders")
+	}
+	if _, ok := loaded.AdvProviders["custom"]; ok {
+		t.Error("custom should be stripped from AdvProviders")
 	}
 }

@@ -37,10 +37,31 @@ type Target struct {
 	Hidden      bool // true when frontmatter sets hidden: true
 }
 
+var unmappedMainAgents = map[string]bool{
+	"adv":   true,
+	"build": true,
+	"plan":  true,
+}
+
 // IsSubagent reports whether the target should be treated as a sub-agent in the
 // TUI and recovery workflows.
 func (t Target) IsSubagent() bool {
 	return t.Kind == KindAgent && (t.Mode == "subagent" || t.Hidden)
+}
+
+// IsModelMappable reports whether omp should manage a direct model override for
+// this target. Main agents/overlays like build, adv, and plan should follow the
+// current session model instead of being pinned here.
+// Provider ADV variants (adv-claude, adv-gpt, adv-glm, adv-kimi) are explicitly
+// whitelisted as mappable so users can assign per-provider models.
+func (t Target) IsModelMappable() bool {
+	if t.Kind != KindAgent {
+		return false
+	}
+	if validAdvProviders[t.Name] {
+		return true
+	}
+	return !unmappedMainAgents[t.Name]
 }
 
 // Model represents an available model from a provider.

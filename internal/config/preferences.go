@@ -20,15 +20,69 @@ import (
 // TargetModels maps each target name (agent or sub-agent) to a model ID.
 // ClearedModels tracks targets whose model was explicitly cleared by the user,
 // so ApplyPreferences can remove the model key from opencode.json.
+// AdvProviders holds provider-specific ADV variant configuration (enable/disable + model).
 type PreferencesConfig struct {
-	TargetModels  map[string]string `json:"target_models"`
-	ClearedModels map[string]bool   `json:"cleared_models,omitempty"`
+	TargetModels  map[string]string            `json:"target_models"`
+	ClearedModels map[string]bool              `json:"cleared_models,omitempty"`
+	AdvProviders  map[string]AdvProviderConfig `json:"adv_providers,omitempty"`
+}
+
+// AdvProviderConfig holds enable/disable and optional model for a provider ADV variant.
+type AdvProviderConfig struct {
+	Enabled bool   `json:"enabled"`
+	Model   string `json:"model,omitempty"`
 }
 
 // PreferencesPath returns the path to omp-preferences.json, respecting
 // OPENCODE_CONFIG_DIR.
 func PreferencesPath() string {
 	return filepath.Join(ConfigDir(), "omp-preferences.json")
+}
+
+// validAdvProviders is the whitelist of allowed provider ADV variant names.
+var validAdvProviders = map[string]bool{
+	"adv-claude": true,
+	"adv-gpt":    true,
+	"adv-glm":    true,
+	"adv-kimi":   true,
+}
+
+func sanitizePreferences(pc PreferencesConfig) (PreferencesConfig, bool) {
+	changed := false
+
+	if pc.TargetModels == nil {
+		pc.TargetModels = make(map[string]string)
+		changed = true
+	}
+	if pc.ClearedModels == nil {
+		pc.ClearedModels = make(map[string]bool)
+		changed = true
+	}
+	if pc.AdvProviders == nil {
+		pc.AdvProviders = make(map[string]AdvProviderConfig)
+		changed = true
+	}
+
+	for name := range pc.TargetModels {
+		if !(Target{Name: name, Kind: KindAgent}).IsModelMappable() {
+			delete(pc.TargetModels, name)
+			changed = true
+		}
+	}
+	for name := range pc.ClearedModels {
+		if !(Target{Name: name, Kind: KindAgent}).IsModelMappable() {
+			delete(pc.ClearedModels, name)
+			changed = true
+		}
+	}
+	for name := range pc.AdvProviders {
+		if !validAdvProviders[name] {
+			delete(pc.AdvProviders, name)
+			changed = true
+		}
+	}
+
+	return pc, changed
 }
 
 // LoadPreferences reads the preferences config from disk.
@@ -48,11 +102,11 @@ func LoadPreferences() (PreferencesConfig, error) {
 	if err := json.Unmarshal(data, &pc); err != nil {
 		return PreferencesConfig{}, err
 	}
-	if pc.TargetModels == nil {
-		pc.TargetModels = make(map[string]string)
-	}
-	if pc.ClearedModels == nil {
-		pc.ClearedModels = make(map[string]bool)
+	pc, changed := sanitizePreferences(pc)
+	if changed {
+		if err := SavePreferences(pc); err != nil {
+			return PreferencesConfig{}, err
+		}
 	}
 	return pc, nil
 }
@@ -60,6 +114,7 @@ func LoadPreferences() (PreferencesConfig, error) {
 // SavePreferences writes the preferences config to disk atomically
 // (temp file + rename).
 func SavePreferences(pc PreferencesConfig) error {
+	pc, _ = sanitizePreferences(pc)
 	data, err := json.MarshalIndent(pc, "", "  ")
 	if err != nil {
 		return err
@@ -71,6 +126,7 @@ func SavePreferences(pc PreferencesConfig) error {
 // that have a model assignment in the preferences config. Targets without an
 // assignment are left unchanged unless explicitly cleared. Creates new entries
 // in opencode.json when a target has a model to set but no existing entry.
+// Also writes AdvProviders configuration (disable + model) for provider ADV variants.
 func ApplyPreferences(pc PreferencesConfig, targets []Target) error {
 	configPath := ConfigPath()
 	raw, err := os.ReadFile(configPath)
@@ -82,6 +138,17 @@ func ApplyPreferences(pc PreferencesConfig, targets []Target) error {
 	for _, t := range targets {
 		existsInConfig := gjson.GetBytes(raw, "agent."+t.Name).Exists()
 		jsonPath := "agent." + t.Name + ".model"
+
+		if !t.IsModelMappable() {
+			if !existsInConfig {
+				continue
+			}
+			updated, err = sjson.DeleteBytes(updated, jsonPath)
+			if err != nil {
+				return fmt.Errorf("deleting %s: %w", jsonPath, err)
+			}
+			continue
+		}
 
 		// Explicitly cleared: remove the model key from opencode.json.
 		// Skip if the target doesn't exist in config — nothing to clear.
@@ -107,6 +174,25 @@ func ApplyPreferences(pc PreferencesConfig, targets []Target) error {
 		updated, err = sjson.SetBytes(updated, jsonPath, model)
 		if err != nil {
 			return fmt.Errorf("setting %s: %w", jsonPath, err)
+		}
+	}
+
+	// Write AdvProviders configuration (disable + model) for provider ADV variants
+	for name, cfg := range pc.AdvProviders {
+		if !validAdvProviders[name] {
+			continue
+		}
+		disablePath := "agent." + name + ".disable"
+		updated, err = sjson.SetBytes(updated, disablePath, !cfg.Enabled)
+		if err != nil {
+			return fmt.Errorf("setting %s: %w", disablePath, err)
+		}
+		if cfg.Model != "" {
+			modelPath := "agent." + name + ".model"
+			updated, err = sjson.SetBytes(updated, modelPath, cfg.Model)
+			if err != nil {
+				return fmt.Errorf("setting %s: %w", modelPath, err)
+			}
 		}
 	}
 

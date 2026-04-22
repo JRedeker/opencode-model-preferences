@@ -107,7 +107,7 @@ func (p pickItem) FilterValue() string { return p.label }
 func buildTargetItems(targets []config.Target, prefs config.PreferencesConfig) []list.Item {
 	var agents, subagents []list.Item
 	for _, t := range targets {
-		if t.Kind != config.KindAgent {
+		if t.Kind != config.KindAgent || !t.IsModelMappable() {
 			continue
 		}
 		prefModel := prefs.TargetModels[t.Name]

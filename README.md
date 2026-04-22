@@ -14,6 +14,8 @@ cd opencode-model-preferences
 make install
 ```
 
+`make install` also installs repo-local git hook `.git/hooks/pre-push` so every future `git push` rebuilds and reinstalls latest `omp` first.
+
 Or build without installing:
 
 ```bash
@@ -28,6 +30,8 @@ cd opencode-model-preferences
 git pull
 make install
 ```
+
+Update flow also refreshes local pre-push hook.
 
 ## Usage
 
@@ -50,7 +54,7 @@ export OPEN_CHAD_OMP_POPUP_SIZE="120x40"    # absolute cells
 
 ### Flow
 
-1. Browse agents and sub-agents — each shows its current model.
+1. Browse managed agents and sub-agents — each shows its current model.
 2. Press `enter` or `m` to pick a model for the selected target.
 3. Press `d` to clear a model assignment.
 4. Press `D` to clear all sub-agent overrides when you need them to inherit again.
@@ -60,6 +64,8 @@ The TUI groups targets into two sections:
 
 - **Agents** — primary and user-facing agents (visible in OpenCode's Tab-cycle)
 - **Sub-agents** — hidden or `mode: subagent` agents used internally by plugins and helper flows (e.g. `adv-researcher`, `adv-reviewer`, `general`, `explore`). These mappings are sticky overrides: changing your main agent model does not change them until you clear them.
+
+`omp` intentionally does **not** map main agents/overlays `build`, `adv`, or `plan`. Those should follow whatever model you select for current session instead of getting pinned as sticky overrides.
 
 ### Keybinds
 
@@ -78,13 +84,11 @@ The TUI groups targets into two sections:
 
 ## Config format
 
-Preferences are stored in `~/.config/opencode/omp-preferences.json` (separate from `opencode.json`, which does not accept unknown keys):
+Preferences are stored in `~/.config/opencode/omp-preferences.json` (separate from `opencode.json`, which does not accept unknown keys). Managed targets exclude `build`, `adv`, and `plan`:
 
 ```json
 {
   "target_models": {
-    "build": "anthropic/claude-opus-4",
-    "plan": "anthropic/claude-opus-4",
     "general": "anthropic/claude-sonnet-4",
     "explore": "anthropic/claude-haiku-4"
   },
@@ -96,6 +100,8 @@ Preferences are stored in `~/.config/opencode/omp-preferences.json` (separate fr
 
 - `target_models` — maps each target to a model ID. Applying writes these to `opencode.json`.
 - `cleared_models` — tracks targets whose model was explicitly cleared. Applying **removes** the `model` key from `opencode.json` for these targets (other fields like `mode` are preserved).
+
+If older `omp-preferences.json` files still contain `build`, `adv`, or `plan`, `omp` removes those stale entries automatically on load/save.
 
 ## How it works
 
@@ -113,7 +119,7 @@ If the refresh fails, `omp` exits immediately with an actionable error:
 
 ### Agent discovery
 
-- **Built-in agents**: `build`, `plan` (primary, locked); `general`, `explore` (subagent)
+- **Built-in agents**: `build`, `plan` (primary, locked, not mapped); `general`, `explore` (subagent)
 - **Markdown agents**: `~/.config/opencode/agents/*.md` and project `.opencode/agents/*.md` — `mode` and `hidden` from frontmatter determine classification
 - **JSON agents**: From `agent.*` keys in `opencode.json` (excludes system agents: `compaction`, `title`, `summary`). Agents with `"hidden": true` appear in the Sub-agents section.
 

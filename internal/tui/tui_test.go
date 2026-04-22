@@ -25,7 +25,7 @@ func TestUpdate_WindowSizeDoesNotPanic(t *testing.T) {
 func TestView_AssignmentsView_ShowsTitle(t *testing.T) {
 	state := &config.State{
 		Targets: []config.Target{
-			{Name: "build", Kind: config.KindAgent, Mode: "primary", Model: "anthropic/claude-opus-4"},
+			{Name: "scout", Kind: config.KindAgent, Mode: "primary", Model: "anthropic/claude-opus-4"},
 		},
 	}
 	m := New(state, config.PreferencesConfig{
@@ -43,7 +43,7 @@ func TestView_AssignmentsView_ShowsTitle(t *testing.T) {
 func TestView_AssignmentsView_ShowsAgentName(t *testing.T) {
 	state := &config.State{
 		Targets: []config.Target{
-			{Name: "build", Kind: config.KindAgent, Mode: "primary", Model: "anthropic/claude-opus-4"},
+			{Name: "scout", Kind: config.KindAgent, Mode: "primary", Model: "anthropic/claude-opus-4"},
 		},
 	}
 	m := New(state, config.PreferencesConfig{
@@ -53,19 +53,19 @@ func TestView_AssignmentsView_ShowsAgentName(t *testing.T) {
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 80})
 	rendered := updated.(Model).View()
 
-	if !strings.Contains(rendered, "build") {
-		t.Fatalf("expected agent name 'build' in render, got:\n%s", rendered)
+	if !strings.Contains(rendered, "scout") {
+		t.Fatalf("expected agent name 'scout' in render, got:\n%s", rendered)
 	}
 }
 
 func TestView_AssignmentsView_ShowsAssignedModel(t *testing.T) {
 	state := &config.State{
 		Targets: []config.Target{
-			{Name: "build", Kind: config.KindAgent, Mode: "primary"},
+			{Name: "scout", Kind: config.KindAgent, Mode: "primary"},
 		},
 	}
 	prefs := config.PreferencesConfig{
-		TargetModels: map[string]string{"build": "anthropic/claude-opus-4"},
+		TargetModels: map[string]string{"scout": "anthropic/claude-opus-4"},
 	}
 	m := New(state, prefs)
 
@@ -79,7 +79,7 @@ func TestView_AssignmentsView_ShowsAssignedModel(t *testing.T) {
 
 func TestBuildTargetItems_HiddenAgentsInSubagentsSection(t *testing.T) {
 	targets := []config.Target{
-		{Name: "build", Kind: config.KindAgent},
+		{Name: "scout", Kind: config.KindAgent},
 		{Name: "adv-reviewer", Kind: config.KindAgent, Hidden: true},
 		{Name: "adv-hardener", Kind: config.KindAgent, Hidden: true},
 	}
@@ -101,9 +101,9 @@ func TestBuildTargetItems_HiddenAgentsInSubagentsSection(t *testing.T) {
 		}
 	}
 
-	// "build" should be under "Agents"
-	if agents := agentsBySection["Agents"]; len(agents) != 1 || agents[0] != "build" {
-		t.Errorf("Agents section = %v, want [build]", agents)
+	// "scout" should be under "Agents"
+	if agents := agentsBySection["Agents"]; len(agents) != 1 || agents[0] != "scout" {
+		t.Errorf("Agents section = %v, want [scout]", agents)
 	}
 
 	// hidden agents should be under "Sub-agents"
@@ -118,7 +118,7 @@ func TestBuildTargetItems_HiddenAgentsInSubagentsSection(t *testing.T) {
 
 func TestBuildTargetItems_ModeSubagentsInSubagentsSection(t *testing.T) {
 	targets := []config.Target{
-		{Name: "build", Kind: config.KindAgent, Mode: "primary"},
+		{Name: "scout", Kind: config.KindAgent, Mode: "primary"},
 		{Name: "general", Kind: config.KindAgent, Mode: "subagent"},
 		{Name: "explore", Kind: config.KindAgent, Mode: "subagent"},
 	}
@@ -137,8 +137,8 @@ func TestBuildTargetItems_ModeSubagentsInSubagentsSection(t *testing.T) {
 		}
 	}
 
-	if got := sections["Agents"]; len(got) != 1 || got[0] != "build" {
-		t.Errorf("Agents section = %v, want [build]", got)
+	if got := sections["Agents"]; len(got) != 1 || got[0] != "scout" {
+		t.Errorf("Agents section = %v, want [scout]", got)
 	}
 	if got := sections["Sub-agents"]; len(got) != 2 || got[0] != "general" || got[1] != "explore" {
 		t.Errorf("Sub-agents section = %v, want [general explore]", got)
@@ -147,7 +147,7 @@ func TestBuildTargetItems_ModeSubagentsInSubagentsSection(t *testing.T) {
 
 func TestBuildTargetItems_SeparatesAgentsAndSubagents(t *testing.T) {
 	targets := []config.Target{
-		{Name: "build", Kind: config.KindAgent},
+		{Name: "scout", Kind: config.KindAgent},
 		{Name: "adv-reviewer", Kind: config.KindAgent, Hidden: true},
 	}
 	prefs := config.PreferencesConfig{
@@ -168,10 +168,10 @@ func TestBuildTargetItems_SeparatesAgentsAndSubagents(t *testing.T) {
 
 func TestBuildTargetItems_ShowsModelInDescription(t *testing.T) {
 	targets := []config.Target{
-		{Name: "build", Kind: config.KindAgent, Model: "anthropic/claude-opus-4"},
+		{Name: "scout", Kind: config.KindAgent, Model: "anthropic/claude-opus-4"},
 	}
 	prefs := config.PreferencesConfig{
-		TargetModels: map[string]string{"build": "openai/gpt-5"},
+		TargetModels: map[string]string{"scout": "openai/gpt-5"},
 	}
 
 	items := buildTargetItems(targets, prefs)
@@ -191,10 +191,10 @@ func TestBuildTargetItems_ShowsModelInDescription(t *testing.T) {
 
 func TestBuildTargetItems_PendingChangeShown(t *testing.T) {
 	targets := []config.Target{
-		{Name: "build", Kind: config.KindAgent, Model: "anthropic/claude-opus-4"},
+		{Name: "scout", Kind: config.KindAgent, Model: "anthropic/claude-opus-4"},
 	}
 	prefs := config.PreferencesConfig{
-		TargetModels: map[string]string{"build": "openai/gpt-5"},
+		TargetModels: map[string]string{"scout": "openai/gpt-5"},
 	}
 
 	items := buildTargetItems(targets, prefs)
@@ -251,7 +251,7 @@ func TestBuildModelPickItems_IncludesClearOption(t *testing.T) {
 
 func TestView_AssignmentsView_ShowsKeyHints(t *testing.T) {
 	state := &config.State{
-		Targets: []config.Target{{Name: "build", Kind: config.KindAgent}},
+		Targets: []config.Target{{Name: "scout", Kind: config.KindAgent}},
 	}
 	prefs := config.PreferencesConfig{TargetModels: map[string]string{}}
 	m := New(state, prefs)
@@ -276,12 +276,12 @@ func TestView_AssignmentsView_ShowsKeyHints(t *testing.T) {
 
 func TestClearSubagentOverrides_ClearsOnlySubagents(t *testing.T) {
 	state := &config.State{Targets: []config.Target{
-		{Name: "build", Kind: config.KindAgent, Mode: "primary"},
+		{Name: "scout", Kind: config.KindAgent, Mode: "primary"},
 		{Name: "general", Kind: config.KindAgent, Mode: "subagent"},
 		{Name: "adv-reviewer", Kind: config.KindAgent, Hidden: true},
 	}}
 	prefs := config.PreferencesConfig{TargetModels: map[string]string{
-		"build":        "openai/gpt-5",
+		"scout":        "openai/gpt-5",
 		"general":      "anthropic/claude-haiku-4",
 		"adv-reviewer": "anthropic/claude-haiku-4",
 	}}
@@ -293,8 +293,8 @@ func TestClearSubagentOverrides_ClearsOnlySubagents(t *testing.T) {
 	}
 	model := updated.(Model)
 
-	if got := model.prefs.TargetModels["build"]; got != "openai/gpt-5" {
-		t.Fatalf("build mapping = %q, want openai/gpt-5", got)
+	if got := model.prefs.TargetModels["scout"]; got != "openai/gpt-5" {
+		t.Fatalf("scout mapping = %q, want openai/gpt-5", got)
 	}
 	if _, ok := model.prefs.TargetModels["general"]; ok {
 		t.Fatal("general mapping should be cleared")
@@ -304,5 +304,28 @@ func TestClearSubagentOverrides_ClearsOnlySubagents(t *testing.T) {
 	}
 	if !model.prefs.ClearedModels["general"] || !model.prefs.ClearedModels["adv-reviewer"] {
 		t.Fatalf("expected cleared models for sub-agents, got %#v", model.prefs.ClearedModels)
+	}
+}
+
+func TestBuildTargetItems_HidesUnmappedMainAgentsAndOverlays(t *testing.T) {
+	targets := []config.Target{
+		{Name: "build", Kind: config.KindAgent, Mode: "primary"},
+		{Name: "plan", Kind: config.KindAgent, Mode: "primary"},
+		{Name: "adv", Kind: config.KindAgent, Mode: "primary"},
+		{Name: "scout", Kind: config.KindAgent, Mode: "primary"},
+		{Name: "general", Kind: config.KindAgent, Mode: "subagent"},
+	}
+
+	items := buildTargetItems(targets, config.PreferencesConfig{TargetModels: map[string]string{}})
+
+	var names []string
+	for _, item := range items {
+		if ti, ok := item.(targetItem); ok {
+			names = append(names, ti.target.Name)
+		}
+	}
+
+	if len(names) != 2 || names[0] != "scout" || names[1] != "general" {
+		t.Fatalf("visible target names = %v, want [scout general]", names)
 	}
 }
