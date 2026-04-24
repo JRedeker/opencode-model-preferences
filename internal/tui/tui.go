@@ -13,7 +13,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/anomalyco/opencode-model-preferences/internal/config"
+	"github.com/sharperflow/opencode-model-preferences/internal/config"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
@@ -326,6 +326,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case modelPickDoneMsg:
+		if config.ValidAdvProvider(msg.targetName) {
+			if m.prefs.AdvProviders == nil {
+				m.prefs.AdvProviders = make(map[string]config.AdvProviderConfig)
+			}
+			cfg := m.prefs.AdvProviders[msg.targetName]
+			if msg.cleared {
+				cfg.Model = ""
+				m.status = fmt.Sprintf("Cleared model for %s", msg.targetName)
+			} else {
+				cfg.Model = msg.model
+				m.status = fmt.Sprintf("Set %s → %s", msg.targetName, msg.model)
+			}
+			m.prefs.AdvProviders[msg.targetName] = cfg
+			m.view = viewAssignments
+			m.rebuildAssignmentList()
+			return m, m.savePrefsCmd()
+		}
 		if m.prefs.TargetModels == nil {
 			m.prefs.TargetModels = make(map[string]string)
 		}
@@ -444,6 +461,18 @@ func (m Model) clearModel() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	if item.advProvider != nil {
+		if m.prefs.AdvProviders == nil {
+			m.prefs.AdvProviders = make(map[string]config.AdvProviderConfig)
+		}
+		cfg := m.prefs.AdvProviders[item.target.Name]
+		cfg.Model = ""
+		m.prefs.AdvProviders[item.target.Name] = cfg
+		m.status = fmt.Sprintf("Cleared model for %s", item.target.Name)
+		m.rebuildAssignmentList()
+		return m, m.savePrefsCmd()
+	}
+
 	if m.prefs.TargetModels == nil {
 		m.prefs.TargetModels = make(map[string]string)
 	}
@@ -530,6 +559,25 @@ func (m *Model) rebuildAssignmentList() {
 	m.assignmentList.SetItems(items)
 }
 
+func (m Model) providerFilesWarning() string {
+	seen := make(map[string]bool)
+	for _, target := range m.state.Targets {
+		if config.ValidAdvProvider(target.Name) {
+			seen[target.Name] = true
+		}
+	}
+	missing := 0
+	for _, name := range []string{"adv-claude", "adv-gpt", "adv-glm", "adv-kimi"} {
+		if !seen[name] {
+			missing++
+		}
+	}
+	if missing == 0 {
+		return ""
+	}
+	return fmt.Sprintf("Warning: %d ADV provider agent file(s) missing from global agents. Run ADV sync-global.sh --fix.", missing)
+}
+
 // -- View --------------------------------------------------------------------
 
 func (m Model) View() string {
@@ -540,6 +588,9 @@ func (m Model) View() string {
 		content = m.assignmentList.View()
 		if m.status != "" {
 			content += "\n" + statusStyle.Render(m.status)
+		}
+		if warning := m.providerFilesWarning(); warning != "" {
+			content += "\n" + faintStyle.Render(warning)
 		}
 		content += "\n" + faintStyle.Render("Sub-agent models are sticky overrides; press D to clear all sub-agent overrides.")
 		content += "\n" + faintStyle.Render("enter/m: set model  d: clear  D: clear sub-agents  e: toggle enable/disable  a: apply to opencode.json  q: quit")

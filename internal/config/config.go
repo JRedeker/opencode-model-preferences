@@ -202,8 +202,10 @@ func discoverTargets(configDir string, raw []byte) []Target {
 	}
 
 	// Markdown agents: global + project (before JSON so markdown mode wins)
-	for _, dir := range listAgentDirs(configDir, projectDir) {
-		targets = append(targets, discoverMarkdownAgents(dir, raw, seen)...)
+	globalAgentsDir := filepath.Join(configDir, "agents")
+	targets = append(targets, discoverMarkdownAgents(globalAgentsDir, raw, seen, true)...)
+	if projectDir != "" {
+		targets = append(targets, discoverMarkdownAgents(filepath.Join(projectDir, "agents"), raw, seen, false)...)
 	}
 
 	// JSON-configured agents (after markdown; mode here only applies to JSON-only agents)
@@ -266,7 +268,7 @@ func discoverProjectOpencodeDir() string {
 }
 
 // discoverMarkdownAgents scans a directory for *.md agent definitions.
-func discoverMarkdownAgents(dir string, raw []byte, seen map[string]bool) []Target {
+func discoverMarkdownAgents(dir string, raw []byte, seen map[string]bool, allowProviderVariants bool) []Target {
 	var targets []Target
 
 	entries, err := os.ReadDir(dir)
@@ -280,6 +282,9 @@ func discoverMarkdownAgents(dir string, raw []byte, seen map[string]bool) []Targ
 		}
 		name := strings.TrimSuffix(e.Name(), ".md")
 		if seen[name] || systemAgents[name] {
+			continue
+		}
+		if !allowProviderVariants && validAdvProviders[name] {
 			continue
 		}
 

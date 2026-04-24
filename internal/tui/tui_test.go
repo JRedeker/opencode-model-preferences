@@ -467,3 +467,53 @@ func TestView_AssignmentsView_ShowsToggleHint(t *testing.T) {
 		t.Fatalf("expected 'e: toggle enable/disable' hint in view, got:\n%s", rendered)
 	}
 }
+
+func TestModelPickDoneMsg_ProviderVariantUpdatesAdvProvidersModel(t *testing.T) {
+	state := &config.State{Targets: []config.Target{{Name: "adv-claude", Kind: config.KindAgent, Mode: "primary"}}}
+	prefs := config.PreferencesConfig{AdvProviders: map[string]config.AdvProviderConfig{
+		"adv-claude": {Enabled: true},
+	}}
+	m := New(state, prefs)
+
+	updated, cmd := m.Update(modelPickDoneMsg{targetName: "adv-claude", model: "anthropic/claude-sonnet-4"})
+	if cmd == nil {
+		t.Fatal("expected save command after provider model pick")
+	}
+	model := updated.(Model)
+	if got := model.prefs.AdvProviders["adv-claude"].Model; got != "anthropic/claude-sonnet-4" {
+		t.Fatalf("provider model = %q, want anthropic/claude-sonnet-4", got)
+	}
+}
+
+func TestClearModel_ProviderVariantClearsAdvProvidersModel(t *testing.T) {
+	state := &config.State{Targets: []config.Target{{Name: "adv-claude", Kind: config.KindAgent, Mode: "primary"}}}
+	prefs := config.PreferencesConfig{AdvProviders: map[string]config.AdvProviderConfig{
+		"adv-claude": {Enabled: true, Model: "anthropic/claude-sonnet-4"},
+	}}
+	m := New(state, prefs)
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 80})
+	m = updated.(Model)
+	m.assignmentList.Select(1)
+
+	updated, cmd := m.clearModel()
+	if cmd == nil {
+		t.Fatal("expected save command after clearing provider model")
+	}
+	model := updated.(Model)
+	if got := model.prefs.AdvProviders["adv-claude"].Model; got != "" {
+		t.Fatalf("provider model = %q, want empty", got)
+	}
+}
+
+func TestView_AssignmentsView_ShowsMissingProviderFilesWarning(t *testing.T) {
+	state := &config.State{
+		Targets: []config.Target{{Name: "adv-claude", Kind: config.KindAgent, Mode: "primary"}},
+	}
+	prefs := config.PreferencesConfig{AdvProviders: map[string]config.AdvProviderConfig{}}
+	m := New(state, prefs)
+
+	rendered := m.View()
+	if !strings.Contains(rendered, "ADV provider agent file(s) missing") {
+		t.Fatalf("expected missing provider files warning, got:\n%s", rendered)
+	}
+}

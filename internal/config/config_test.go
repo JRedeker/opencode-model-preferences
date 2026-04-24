@@ -362,7 +362,7 @@ You are a security auditor.
 
 	raw := []byte(`{}`)
 	seen := make(map[string]bool)
-	targets := discoverMarkdownAgents(agentDir, raw, seen)
+	targets := discoverMarkdownAgents(agentDir, raw, seen, true)
 
 	if len(targets) != 1 {
 		t.Fatalf("expected 1 agent, got %d", len(targets))
@@ -694,7 +694,7 @@ You explore.
 
 	raw := []byte(`{}`)
 	seen := make(map[string]bool)
-	targets := discoverMarkdownAgents(dir, raw, seen)
+	targets := discoverMarkdownAgents(dir, raw, seen, true)
 
 	if len(targets) != 3 {
 		t.Fatalf("expected 3 agents, got %d", len(targets))
@@ -762,7 +762,7 @@ You are a security auditor.
 
 	raw := []byte(`{}`)
 	seen := make(map[string]bool)
-	targets := discoverMarkdownAgents(dir, raw, seen)
+	targets := discoverMarkdownAgents(dir, raw, seen, true)
 
 	if len(targets) != 1 {
 		t.Fatalf("expected 1 agent, got %d", len(targets))
@@ -1186,7 +1186,7 @@ func TestApplyPreferences_ClearedModelRemovesFromConfig(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("OPENCODE_CONFIG_DIR", dir)
 
-	// opencode.json has a model set for scout
+	// opencode.json already has a model set for scout
 	initial := `{"agent": {"scout": {"model": "old/model", "mode": "primary"}}}`
 	os.WriteFile(filepath.Join(dir, "opencode.json"), []byte(initial), 0644)
 
@@ -1301,10 +1301,9 @@ func TestDiscoverTargets_DoesNotDiscoverProjectLocalProviderAgents(t *testing.T)
 
 	// Global has adv-claude
 	os.WriteFile(filepath.Join(globalAgentDir, "adv-claude.md"), []byte("---\nmode: primary\n---\n"), 0644)
-	// Project-local has adv-gpt (should be ignored for provider-ADV)
+	// Project-local has adv-gpt (must be ignored for provider-ADV)
 	os.WriteFile(filepath.Join(projectDir, "adv-gpt.md"), []byte("---\nmode: primary\n---\n"), 0644)
 
-	// Set working dir to project
 	oldWD, _ := os.Getwd()
 	defer os.Chdir(oldWD)
 	os.Chdir(filepath.Join(root, "project"))
@@ -1322,10 +1321,9 @@ func TestDiscoverTargets_DoesNotDiscoverProjectLocalProviderAgents(t *testing.T)
 	if !names["adv-claude"] {
 		t.Error("adv-claude from global should be discovered")
 	}
-	// Project-local agents may still be discovered by the general markdown scan,
-	// but provider-ADV state should only come from global.
-	// This test documents current behavior; the provider-ADV whitelist ensures
-	// only the four valid names are treated as provider variants regardless of source.
+	if names["adv-gpt"] {
+		t.Error("adv-gpt from project-local .opencode/agents must be excluded")
+	}
 }
 
 func TestApplyPreferences_WritesProviderADVDisableAndModel(t *testing.T) {
