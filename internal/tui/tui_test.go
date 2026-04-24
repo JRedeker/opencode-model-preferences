@@ -361,6 +361,29 @@ func TestBuildTargetItems_ShowsADVProviderAgentsSection(t *testing.T) {
 	}
 }
 
+func TestBuildTargetItems_ProviderVariantShowsModelFromTargetFallback(t *testing.T) {
+	targets := []config.Target{
+		{Name: "adv-claude", Kind: config.KindAgent, Mode: "primary", Model: "anthropic/claude-sonnet-4"},
+	}
+	prefs := config.PreferencesConfig{AdvProviders: map[string]config.AdvProviderConfig{
+		"adv-claude": {Enabled: true, Model: ""},
+	}}
+	items := buildTargetItems(targets, prefs)
+
+	for _, item := range items {
+		ti, ok := item.(targetItem)
+		if !ok {
+			continue
+		}
+		desc := ti.Description()
+		if !strings.Contains(desc, "enabled  model: anthropic/claude-sonnet-4") {
+			t.Fatalf("expected 'enabled  model: anthropic/claude-sonnet-4' in description, got: %s", desc)
+		}
+		return
+	}
+	t.Fatal("target item not found")
+}
+
 func TestBuildTargetItems_ProviderVariantShowsEnabledStatus(t *testing.T) {
 	targets := []config.Target{
 		{Name: "adv-claude", Kind: config.KindAgent, Mode: "primary"},

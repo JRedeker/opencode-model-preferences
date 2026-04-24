@@ -64,14 +64,17 @@ func (t targetItem) Title() string { return t.target.Name }
 func (t targetItem) Description() string {
 	// Provider ADV variant display
 	if t.advProvider != nil {
-		status := "disabled"
-		if t.advProvider.Enabled {
-			status = "enabled"
+		if !t.advProvider.Enabled {
+			return "disabled"
 		}
-		if t.advProvider.Model != "" {
-			return fmt.Sprintf("%s  model: %s", status, t.advProvider.Model)
+		model := t.advProvider.Model
+		if model == "" {
+			model = t.target.Model
 		}
-		return status
+		if model != "" {
+			return fmt.Sprintf("enabled  model: %s", model)
+		}
+		return "enabled"
 	}
 
 	current := t.target.Model
