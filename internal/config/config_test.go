@@ -10,6 +10,27 @@ import (
 	"github.com/tidwall/gjson"
 )
 
+func mustWriteFile(t *testing.T, path string, data []byte, perm os.FileMode) {
+	t.Helper()
+	if err := os.WriteFile(path, data, perm); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+func mustMkdirAll(t *testing.T, path string, perm os.FileMode) {
+	t.Helper()
+	if err := os.MkdirAll(path, perm); err != nil {
+		t.Fatalf("mkdir %s: %v", path, err)
+	}
+}
+
+func mustChdir(t *testing.T, dir string) {
+	t.Helper()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir %s: %v", dir, err)
+	}
+}
+
 // -- CLI-first model source tests --------------------------------------------
 // These tests verify that Load uses CLI-discovered models as primary source
 // and falls back to provider.*.models config parsing when CLI fails.
@@ -26,7 +47,7 @@ func TestLoad_UsesCLIModelsAsPrimarySource(t *testing.T) {
 			}
 		}
 	}`
-	os.WriteFile(filepath.Join(dir, "opencode.json"), []byte(configJSON), 0644)
+	mustWriteFile(t, filepath.Join(dir, "opencode.json"), []byte(configJSON), 0644)
 	t.Setenv("OPENCODE_CONFIG_DIR", dir)
 
 	// CLI returns a different (larger) set of models
@@ -73,7 +94,7 @@ func TestLoad_FallsBackToConfigWhenCLIFails(t *testing.T) {
 			}
 		}
 	}`
-	os.WriteFile(filepath.Join(dir, "opencode.json"), []byte(configJSON), 0644)
+	mustWriteFile(t, filepath.Join(dir, "opencode.json"), []byte(configJSON), 0644)
 	t.Setenv("OPENCODE_CONFIG_DIR", dir)
 
 	// CLI fetch fails (non-zero exit)
@@ -110,7 +131,7 @@ func TestLoad_FallsBackToConfigWhenCLIReturnsEmpty(t *testing.T) {
 			}
 		}
 	}`
-	os.WriteFile(filepath.Join(dir, "opencode.json"), []byte(configJSON), 0644)
+	mustWriteFile(t, filepath.Join(dir, "opencode.json"), []byte(configJSON), 0644)
 	t.Setenv("OPENCODE_CONFIG_DIR", dir)
 
 	// CLI returns empty output (no parseable models)
@@ -138,7 +159,7 @@ func TestLoad_FallsBackToConfigWhenCLIReturnsEmpty(t *testing.T) {
 
 func TestLoad_CLIModelsAreSortedDeterministically(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "opencode.json"), []byte(`{}`), 0644)
+	mustWriteFile(t, filepath.Join(dir, "opencode.json"), []byte(`{}`), 0644)
 	t.Setenv("OPENCODE_CONFIG_DIR", dir)
 
 	withCommandRunner(t, func(ctx context.Context, name string, args ...string) ([]byte, error) {
@@ -348,7 +369,7 @@ func TestDiscoverTargets_IgnoresConfiguredCommands(t *testing.T) {
 func TestDiscoverMarkdownAgents(t *testing.T) {
 	dir := t.TempDir()
 	agentDir := filepath.Join(dir, "agents")
-	os.MkdirAll(agentDir, 0755)
+	mustMkdirAll(t, agentDir, 0755)
 
 	content := `---
 description: Security auditor
@@ -358,7 +379,7 @@ model: anthropic/claude-sonnet-4-20250514
 
 You are a security auditor.
 `
-	os.WriteFile(filepath.Join(agentDir, "security.md"), []byte(content), 0644)
+	mustWriteFile(t, filepath.Join(agentDir, "security.md"), []byte(content), 0644)
 
 	raw := []byte(`{}`)
 	seen := make(map[string]bool)
@@ -406,7 +427,9 @@ You research docs.
 		t.Fatalf("getwd: %v", err)
 	}
 	defer func() {
-		_ = os.Chdir(oldWD)
+		if err := os.Chdir(oldWD); err != nil {
+			t.Fatalf("chdir back: %v", err)
+		}
 	}()
 	if err := os.Chdir(nested); err != nil {
 		t.Fatalf("chdir nested: %v", err)
@@ -462,11 +485,11 @@ func TestDiscoverTargets_UsesOPENCODEPROJECTDIRForMarkdownAgents(t *testing.T) {
 func TestMarkdownModeWinsOverJSONDefault(t *testing.T) {
 	dir := t.TempDir()
 	agentDir := filepath.Join(dir, "agents")
-	os.MkdirAll(agentDir, 0755)
+	mustMkdirAll(t, agentDir, 0755)
 
 	// markdown defines mode: subagent
 	content := "---\ndescription: Docs researcher\nmode: subagent\n---\nYou research docs.\n"
-	os.WriteFile(filepath.Join(agentDir, "librarian.md"), []byte(content), 0644)
+	mustWriteFile(t, filepath.Join(agentDir, "librarian.md"), []byte(content), 0644)
 
 	// JSON entry has a model override but no mode (would default to "all")
 	raw := []byte(`{
@@ -533,7 +556,7 @@ model: google/gemini-2.5-flash
 
 Content here
 `
-	os.WriteFile(path, []byte(content), 0644)
+	mustWriteFile(t, path, []byte(content), 0644)
 
 	if got := parseFrontmatterField(path, "mode"); got != "primary" {
 		t.Errorf("mode = %q, want primary", got)
@@ -557,7 +580,7 @@ func TestSetAgentOrder_ReordersKeys(t *testing.T) {
     "refine": {"mode": "primary"}
   }
 }`
-	os.WriteFile(configPath, []byte(initial), 0644)
+	mustWriteFile(t, configPath, []byte(initial), 0644)
 	t.Setenv("OPENCODE_CONFIG_DIR", dir)
 
 	// Reorder: refine before scout
@@ -589,7 +612,7 @@ func TestSetAgentOrder_PreservesValues(t *testing.T) {
     "refine": {"model": "anthropic/claude-opus-4"}
   }
 }`
-	os.WriteFile(configPath, []byte(initial), 0644)
+	mustWriteFile(t, configPath, []byte(initial), 0644)
 	t.Setenv("OPENCODE_CONFIG_DIR", dir)
 
 	err := SetAgentOrder([]string{"refine", "scout"})
@@ -617,7 +640,7 @@ func TestSetAgentOrder_SkipsUnknownNames(t *testing.T) {
     "refine": {}
   }
 }`
-	os.WriteFile(configPath, []byte(initial), 0644)
+	mustWriteFile(t, configPath, []byte(initial), 0644)
 	t.Setenv("OPENCODE_CONFIG_DIR", dir)
 
 	// includes a nonexistent name — should not error and should preserve both real agents
@@ -641,7 +664,7 @@ func TestSetAgentOrder_NoOpWithEmptyAgentSection(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "opencode.json")
 	initial := `{"theme": "dark"}`
-	os.WriteFile(configPath, []byte(initial), 0644)
+	mustWriteFile(t, configPath, []byte(initial), 0644)
 	t.Setenv("OPENCODE_CONFIG_DIR", dir)
 
 	err := SetAgentOrder([]string{"build", "plan"})
@@ -669,7 +692,7 @@ hidden: true
 
 You are hidden.
 `
-	os.WriteFile(filepath.Join(dir, "adv-researcher.md"), []byte(hiddenContent), 0644)
+	mustWriteFile(t, filepath.Join(dir, "adv-researcher.md"), []byte(hiddenContent), 0644)
 
 	// hidden: false agent (explicit)
 	visibleContent := `---
@@ -680,7 +703,7 @@ hidden: false
 
 You are visible.
 `
-	os.WriteFile(filepath.Join(dir, "librarian.md"), []byte(visibleContent), 0644)
+	mustWriteFile(t, filepath.Join(dir, "librarian.md"), []byte(visibleContent), 0644)
 
 	// no hidden field (defaults to false)
 	defaultContent := `---
@@ -690,7 +713,7 @@ mode: subagent
 
 You explore.
 `
-	os.WriteFile(filepath.Join(dir, "explore-custom.md"), []byte(defaultContent), 0644)
+	mustWriteFile(t, filepath.Join(dir, "explore-custom.md"), []byte(defaultContent), 0644)
 
 	raw := []byte(`{}`)
 	seen := make(map[string]bool)
@@ -758,7 +781,7 @@ hidden: true
 
 You are a security auditor.
 `
-	os.WriteFile(filepath.Join(dir, "adv-security-reviewer.md"), []byte(content), 0644)
+	mustWriteFile(t, filepath.Join(dir, "adv-security-reviewer.md"), []byte(content), 0644)
 
 	raw := []byte(`{}`)
 	seen := make(map[string]bool)
@@ -805,7 +828,7 @@ func TestLoadPreferences_ExistingFile(t *testing.T) {
 			"general": "openai/gpt-5"
 		}
 	}`
-	os.WriteFile(filepath.Join(dir, "omp-preferences.json"), []byte(content), 0644)
+	mustWriteFile(t, filepath.Join(dir, "omp-preferences.json"), []byte(content), 0644)
 
 	pc, err := LoadPreferences()
 	if err != nil {
@@ -836,7 +859,7 @@ func TestLoadPreferences_SanitizesAndRewritesUnmappedMainAgents(t *testing.T) {
 		}
 	}`
 	path := filepath.Join(dir, "omp-preferences.json")
-	os.WriteFile(path, []byte(content), 0644)
+	mustWriteFile(t, path, []byte(content), 0644)
 
 	pc, err := LoadPreferences()
 	if err != nil {
@@ -876,7 +899,7 @@ func TestLoadPreferences_SanitizesAndRewritesUnmappedMainAgents(t *testing.T) {
 func TestLoadPreferences_NilMapInitialized(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("OPENCODE_CONFIG_DIR", dir)
-	os.WriteFile(filepath.Join(dir, "omp-preferences.json"), []byte(`{}`), 0644)
+	mustWriteFile(t, filepath.Join(dir, "omp-preferences.json"), []byte(`{}`), 0644)
 
 	pc, err := LoadPreferences()
 	if err != nil {
@@ -890,7 +913,7 @@ func TestLoadPreferences_NilMapInitialized(t *testing.T) {
 func TestLoadPreferences_CorruptJSON(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("OPENCODE_CONFIG_DIR", dir)
-	os.WriteFile(filepath.Join(dir, "omp-preferences.json"), []byte(`{not valid`), 0644)
+	mustWriteFile(t, filepath.Join(dir, "omp-preferences.json"), []byte(`{not valid`), 0644)
 
 	_, err := LoadPreferences()
 	if err == nil {
@@ -997,7 +1020,7 @@ func TestApplyPreferences_WritesModelToAgents(t *testing.T) {
 	    "general": {"mode": "subagent"}
   }
 }`
-	os.WriteFile(filepath.Join(dir, "opencode.json"), []byte(initial), 0644)
+	mustWriteFile(t, filepath.Join(dir, "opencode.json"), []byte(initial), 0644)
 
 	targets := []Target{
 		{Name: "scout", Kind: KindAgent},
@@ -1030,7 +1053,7 @@ func TestApplyPreferences_CreatesEntryForTargetNotInConfig(t *testing.T) {
 	t.Setenv("OPENCODE_CONFIG_DIR", dir)
 
 	initial := `{"agent": {"scout": {}}}`
-	os.WriteFile(filepath.Join(dir, "opencode.json"), []byte(initial), 0644)
+	mustWriteFile(t, filepath.Join(dir, "opencode.json"), []byte(initial), 0644)
 
 	targets := []Target{
 		{Name: "scout", Kind: KindAgent},
@@ -1071,7 +1094,7 @@ func TestApplyPreferences_UnmappedMainAgentsAreClearedFromConfig(t *testing.T) {
     "general": {"model": "old/general", "mode": "subagent"}
   }
 }`
-	os.WriteFile(filepath.Join(dir, "opencode.json"), []byte(initial), 0644)
+	mustWriteFile(t, filepath.Join(dir, "opencode.json"), []byte(initial), 0644)
 
 	targets := []Target{
 		{Name: "build", Kind: KindAgent, Mode: "primary"},
@@ -1110,7 +1133,7 @@ func TestApplyPreferences_ClearSkipsTargetNotInConfig(t *testing.T) {
 	t.Setenv("OPENCODE_CONFIG_DIR", dir)
 
 	initial := `{"agent": {"build": {"model": "old/model"}}}`
-	os.WriteFile(filepath.Join(dir, "opencode.json"), []byte(initial), 0644)
+	mustWriteFile(t, filepath.Join(dir, "opencode.json"), []byte(initial), 0644)
 
 	targets := []Target{
 		{Name: "build", Kind: KindAgent},
@@ -1141,7 +1164,7 @@ func TestApplyPreferences_NoAssignmentSkipsTarget(t *testing.T) {
 	t.Setenv("OPENCODE_CONFIG_DIR", dir)
 
 	initial := `{"agent": {"scout": {"model": "existing/model"}}}`
-	os.WriteFile(filepath.Join(dir, "opencode.json"), []byte(initial), 0644)
+	mustWriteFile(t, filepath.Join(dir, "opencode.json"), []byte(initial), 0644)
 
 	targets := []Target{{Name: "scout", Kind: KindAgent}}
 	pc := PreferencesConfig{
@@ -1164,7 +1187,7 @@ func TestApplyPreferences_EmptyModelSkipsTarget(t *testing.T) {
 	t.Setenv("OPENCODE_CONFIG_DIR", dir)
 
 	initial := `{"agent": {"scout": {"model": "existing/model"}}}`
-	os.WriteFile(filepath.Join(dir, "opencode.json"), []byte(initial), 0644)
+	mustWriteFile(t, filepath.Join(dir, "opencode.json"), []byte(initial), 0644)
 
 	targets := []Target{{Name: "scout", Kind: KindAgent}}
 	pc := PreferencesConfig{
@@ -1188,7 +1211,7 @@ func TestApplyPreferences_ClearedModelRemovesFromConfig(t *testing.T) {
 
 	// opencode.json already has a model set for scout
 	initial := `{"agent": {"scout": {"model": "old/model", "mode": "primary"}}}`
-	os.WriteFile(filepath.Join(dir, "opencode.json"), []byte(initial), 0644)
+	mustWriteFile(t, filepath.Join(dir, "opencode.json"), []byte(initial), 0644)
 
 	targets := []Target{{Name: "scout", Kind: KindAgent}}
 	// Preferences has ClearedModels indicating scout was explicitly cleared
@@ -1219,7 +1242,7 @@ func TestApplyPreferences_OverwritesExistingModel(t *testing.T) {
 
 	// opencode.json already has a model set for scout
 	initial := `{"agent": {"scout": {"model": "old/model"}}}`
-	os.WriteFile(filepath.Join(dir, "opencode.json"), []byte(initial), 0644)
+	mustWriteFile(t, filepath.Join(dir, "opencode.json"), []byte(initial), 0644)
 
 	targets := []Target{{Name: "scout", Kind: KindAgent}}
 	pc := PreferencesConfig{
@@ -1266,7 +1289,7 @@ func TestTargetIsModelMappable_ProviderVariantsAllowed(t *testing.T) {
 func TestDiscoverTargets_ProviderVariantsFromGlobalAgents(t *testing.T) {
 	dir := t.TempDir()
 	agentDir := filepath.Join(dir, "agents")
-	os.MkdirAll(agentDir, 0755)
+	mustMkdirAll(t, agentDir, 0755)
 
 	for _, name := range []string{"adv-claude", "adv-gpt", "adv-glm", "adv-kimi"} {
 		content := `---
@@ -1274,7 +1297,7 @@ name: ` + name + `
 mode: primary
 ---
 `
-		os.WriteFile(filepath.Join(agentDir, name+".md"), []byte(content), 0644)
+		mustWriteFile(t, filepath.Join(agentDir, name+".md"), []byte(content), 0644)
 	}
 
 	raw := []byte(`{}`)
@@ -1296,17 +1319,21 @@ func TestDiscoverTargets_DoesNotDiscoverProjectLocalProviderAgents(t *testing.T)
 	root := t.TempDir()
 	globalAgentDir := filepath.Join(root, "global", "agents")
 	projectDir := filepath.Join(root, "project", ".opencode", "agents")
-	os.MkdirAll(globalAgentDir, 0755)
-	os.MkdirAll(projectDir, 0755)
+	mustMkdirAll(t, globalAgentDir, 0755)
+	mustMkdirAll(t, projectDir, 0755)
 
 	// Global has adv-claude
-	os.WriteFile(filepath.Join(globalAgentDir, "adv-claude.md"), []byte("---\nmode: primary\n---\n"), 0644)
+	mustWriteFile(t, filepath.Join(globalAgentDir, "adv-claude.md"), []byte("---\nmode: primary\n---\n"), 0644)
 	// Project-local has adv-gpt (must be ignored for provider-ADV)
-	os.WriteFile(filepath.Join(projectDir, "adv-gpt.md"), []byte("---\nmode: primary\n---\n"), 0644)
+	mustWriteFile(t, filepath.Join(projectDir, "adv-gpt.md"), []byte("---\nmode: primary\n---\n"), 0644)
 
 	oldWD, _ := os.Getwd()
-	defer os.Chdir(oldWD)
-	os.Chdir(filepath.Join(root, "project"))
+	defer func() {
+		if err := os.Chdir(oldWD); err != nil {
+			t.Fatalf("chdir back to %s: %v", oldWD, err)
+		}
+	}()
+	mustChdir(t, filepath.Join(root, "project"))
 
 	t.Setenv("OPENCODE_CONFIG_DIR", filepath.Join(root, "global"))
 
@@ -1331,7 +1358,7 @@ func TestApplyPreferences_WritesProviderADVDisableAndModel(t *testing.T) {
 	t.Setenv("OPENCODE_CONFIG_DIR", dir)
 
 	initial := `{"agent": {}}`
-	os.WriteFile(filepath.Join(dir, "opencode.json"), []byte(initial), 0644)
+	mustWriteFile(t, filepath.Join(dir, "opencode.json"), []byte(initial), 0644)
 
 	targets := []Target{
 		{Name: "adv-claude", Kind: KindAgent, Mode: "primary"},

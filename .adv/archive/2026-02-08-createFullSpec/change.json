@@ -1,5 +1,5 @@
 {
-  "$schema": "https://raw.githubusercontent.com/anomalyco/oc-plugins/main/advance/plugin/schemas/change.schema.json",
+  "$schema": "https://raw.githubusercontent.com/sharperflow/oc-plugins/main/advance/plugin/schemas/change.schema.json",
   "id": "createFullSpec",
   "title": "create full spec",
   "status": "archived",

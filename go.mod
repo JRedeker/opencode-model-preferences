@@ -1,4 +1,4 @@
-module github.com/anomalyco/opencode-model-preferences
+module github.com/sharperflow/opencode-model-preferences
 
 go 1.24.2
 

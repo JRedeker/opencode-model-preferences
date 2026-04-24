@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/anomalyco/opencode-model-preferences/internal/config"
+	"github.com/sharperflow/opencode-model-preferences/internal/config"
 	tea "github.com/charmbracelet/bubbletea"
 )
 

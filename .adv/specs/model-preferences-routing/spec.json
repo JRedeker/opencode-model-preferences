@@ -1,5 +1,5 @@
 {
-  "$schema": "https://raw.githubusercontent.com/anomalyco/oc-plugins/main/advance/plugin/schemas/spec.schema.json",
+  "$schema": "https://raw.githubusercontent.com/sharperflow/oc-plugins/main/advance/plugin/schemas/spec.schema.json",
   "name": "model-preferences-routing",
   "title": "Model Preferences",
   "purpose": "TUI for managing per-agent/per-command model preferences in OpenCode. Users pick a model for each agent or command, then apply to write preferences to opencode.json.",

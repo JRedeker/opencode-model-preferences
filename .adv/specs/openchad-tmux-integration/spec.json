@@ -1,5 +1,5 @@
 {
-  "$schema": "https://raw.githubusercontent.com/anomalyco/oc-plugins/main/advance/plugin/schemas/spec.schema.json",
+  "$schema": "https://raw.githubusercontent.com/sharperflow/oc-plugins/main/advance/plugin/schemas/spec.schema.json",
   "name": "openchad-tmux-integration",
   "title": "Openchad Tmux Integration",
   "purpose": "Capability: Openchad Tmux Integration",

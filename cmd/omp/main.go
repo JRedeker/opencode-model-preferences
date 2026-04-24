@@ -6,8 +6,8 @@ import (
 	"io"
 	"os"
 
-	"github.com/anomalyco/opencode-model-preferences/internal/config"
-	"github.com/anomalyco/opencode-model-preferences/internal/tui"
+	"github.com/sharperflow/opencode-model-preferences/internal/config"
+	"github.com/sharperflow/opencode-model-preferences/internal/tui"
 	tea "github.com/charmbracelet/bubbletea"
 )
 

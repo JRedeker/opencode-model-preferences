@@ -1,6 +1,6 @@
 # omp — OpenCode Model Preferences
 
-A TUI for managing per-agent model preferences in [OpenCode](https://github.com/anomalyco/opencode).
+A TUI for managing per-agent model preferences in [OpenCode](https://github.com/sharperflow/opencode).
 
 Pick a model for each agent or sub-agent, then apply to write preferences to `opencode.json`.
 

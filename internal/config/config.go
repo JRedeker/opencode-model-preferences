@@ -234,14 +234,6 @@ func discoverTargets(configDir string, raw []byte) []Target {
 	return targets
 }
 
-func listAgentDirs(configDir, projectDir string) []string {
-	dirs := []string{filepath.Join(configDir, "agents")}
-	if projectDir != "" {
-		dirs = append(dirs, filepath.Join(projectDir, "agents"))
-	}
-	return dirs
-}
-
 func discoverProjectOpencodeDir() string {
 	if project := os.Getenv("OPENCODE_PROJECT_DIR"); project != "" {
 		return filepath.Join(project, ".opencode")
